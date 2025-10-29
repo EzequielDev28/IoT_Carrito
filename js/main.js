@@ -1,17 +1,19 @@
-// --- 1. Configuración Global ACTUALIZADA ---
-// DETECTAR SI ESTAMOS EN GITHUB PAGES O DESARROLLO LOCAL
-const isGitHubPages = window.location.hostname.includes('github.io');
+// --- 1. Configuración Global EXCLUSIVA AWS ---
+// CONFIGURACIÓN PARA AWS - COMENTA PARA USO LOCAL
+const isGitHubPages = true; // Forzado para AWS
+const API_BASE_URL = 'https://100.26.151.211:443/api';
+const WS_BASE_URL = 'https://100.26.151.211:443';
 
-// URLs según el entorno - REEMPLAZA 100.26.151.211 CON TU IP DE AWS
-const API_BASE_URL = isGitHubPages 
-    ? 'https://100.26.151.211:443/api'  // HTTPS para GitHub Pages
-    : 'http://127.0.0.1:5500/api';  // HTTP para desarrollo local
+// ════════════════════════════════════════════════════
+// CONFIGURACIÓN LOCAL (COMENTADA) - DESCOMENTAR PARA DESARROLLO LOCAL
+/*
+const isGitHubPages = false;
+const API_BASE_URL = 'http://127.0.0.1:5500/api';
+const WS_BASE_URL = 'http://127.0.0.1:5500';
+*/
+// ════════════════════════════════════════════════════
 
-const WS_BASE_URL = isGitHubPages 
-    ? 'https://100.26.151.211:443'      // WSS para GitHub Pages  
-    : 'http://127.0.0.1:5500';      // WS para desarrollo local
-
-console.log(`🌐 Entorno: ${isGitHubPages ? 'GitHub Pages (HTTPS)' : 'Desarrollo Local (HTTP)'}`);
+console.log(`🌐 Entorno: AWS EC2 Instance`);
 console.log(`🔗 API: ${API_BASE_URL}`);
 console.log(`🔗 WebSocket: ${WS_BASE_URL}`);
 
@@ -130,127 +132,212 @@ let movementCache = [];
 let obstacleCache = [];
 
 function connectWebSocket() {
-    if (socket && socket.connected) {
-        socket.off();
+    console.log('🔄 Iniciando conexión WebSocket...');
+    
+    // Limpiar conexión anterior si existe
+    if (socket) {
+        console.log('🧹 Limpiando socket anterior...');
         socket.disconnect();
+        socket = null;
     }
 
-    // CONFIGURACIÓN MEJORADA PARA SSL
+    // CONFIGURACIÓN MEJORADA para AWS
     const socketOptions = {
         transports: ['websocket', 'polling'],
-        timeout: 5000,
+        timeout: 15000,
         reconnection: true,
-        reconnectionAttempts: 5,
-        reconnectionDelay: 1000
+        reconnectionAttempts: 10,
+        reconnectionDelay: 3000,
+        secure: true,
+        rejectUnauthorized: false,
+        forceNew: true  // IMPORTANTE: Forzar nueva conexión
     };
 
-    // AGREGAR CONFIGURACIÓN SSL SOLO PARA GITHUB PAGES
-    if (isGitHubPages) {
-        socketOptions.secure = true;
-        socketOptions.rejectUnauthorized = false; // Para certificados auto-firmados
-        console.log('🔒 Conectando con WebSocket seguro (WSS)');
-    } else {
-        console.log('🔓 Conectando con WebSocket normal (WS)');
-    }
+    console.log(`🔗 Conectando a: ${WS_BASE_URL}`);
+    console.log('⚙️ Opciones:', socketOptions);
 
-    socket = io(WS_BASE_URL, socketOptions);
+    try {
+        socket = io(WS_BASE_URL, socketOptions);
+        console.log('✅ Socket.io instanciado correctamente');
+    } catch (error) {
+        console.error('❌ Error creando socket:', error);
+        showAlert('Error inicializando WebSocket', 'danger');
+        return;
+    }
 
     const wsStatus = document.getElementById('wsStatus');
 
+    // --- EVENT LISTENERS MEJORADOS ---
+    
     socket.on('connect', () => {
-        console.log('✅ WebSocket conectado:', socket.id);
+        console.log('✅✅✅ WebSocket CONECTADO exitosamente! ID:', socket.id);
         wsStatus.textContent = 'Conectado';
         wsStatus.className = 'fw-bold text-success';
         
-        logToWS(`Conectado al dispositivo: ${DEVICE_NAME}`);
+        logToWS(`✅ Conectado al dispositivo: ${DEVICE_NAME}`);
+        showAlert('WebSocket conectado - Monitoreo activo', 'success');
         
-        // Suscribirse al monitoreo automático
-        subscribeToMonitoring();
-        
-        // Cargar datos iniciales via WebSocket
-        requestImmediateData();
+        // Suscribirse después de un pequeño delay
+        setTimeout(() => {
+            subscribeToMonitoring();
+            requestImmediateData();
+        }, 1000);
     });
 
     socket.on('disconnect', (reason) => {
-        console.log('❌ WebSocket desconectado:', reason);
+        console.log('❌ WebSocket desconectado. Razón:', reason);
         wsStatus.textContent = 'Desconectado';
         wsStatus.className = 'fw-bold text-danger';
-        logToWS(`Desconectado: ${reason}`);
+        logToWS(`❌ Desconectado: ${reason}`);
         isMonitoringActive = false;
-    });
-
-    socket.on('connect_error', (error) => {
-        console.log('❌ Error de conexión WebSocket:', error);
-        wsStatus.textContent = 'Error de conexión';
-        wsStatus.className = 'fw-bold text-warning';
-        logToWS(`Error de conexión: ${error.message}`);
         
-        // Mostrar ayuda específica para SSL
-        if (isGitHubPages && error.message.includes('SSL')) {
-            showAlert('Error SSL: Verifica que el servidor tenga certificados válidos', 'danger');
+        // Reconexión automática para ciertos tipos de desconexión
+        if (reason === 'io server disconnect' || reason === 'transport close') {
+            console.log('🔄 Intentando reconexión automática...');
+            setTimeout(() => connectWebSocket(), 2000);
         }
     });
 
+    socket.on('connect_error', (error) => {
+        console.error('❌ ERROR de conexión WebSocket:', error);
+        console.error('🔍 Detalles del error:', {
+            message: error.message,
+            type: error.type,
+            description: error.description
+        });
+        
+        wsStatus.textContent = 'Error de conexión';
+        wsStatus.className = 'fw-bold text-warning';
+        logToWS(`❌ Error: ${error.message}`);
+        
+        // Diagnóstico específico de errores comunes
+        if (error.message.includes('SSL')) {
+            showAlert('Error SSL/TLS - Verificando certificados...', 'warning');
+        } else if (error.message.includes('timeout')) {
+            showAlert('Timeout de conexión - Reintentando...', 'warning');
+        } else if (error.message.includes('xhr poll error')) {
+            showAlert('Error de transporte HTTP - Cambiando a WebSocket...', 'warning');
+        } else {
+            showAlert(`Error conexión: ${error.message}`, 'danger');
+        }
+        
+        // Reconexión después de 5 segundos
+        setTimeout(() => {
+            console.log('🔄 Reintentando conexión WebSocket...');
+            connectWebSocket();
+        }, 5000);
+    });
+
+    socket.on('reconnect_attempt', (attempt) => {
+        console.log(`🔄 Intento de reconexión #${attempt}`);
+        logToWS(`🔄 Reconectando... intento ${attempt}`);
+    });
+
+    socket.on('reconnect', (attempt) => {
+        console.log(`✅ Reconectado después de ${attempt} intentos`);
+        logToWS('✅ Reconexión exitosa');
+        showAlert('WebSocket reconectado', 'success');
+    });
+
+    socket.on('reconnect_error', (error) => {
+        console.error('❌ Error en reconexión:', error);
+        logToWS('❌ Error en reconexión');
+    });
+
+    // --- EVENTOS DE DATOS ---
     socket.on('connection_status', (data) => {
-        console.log('📊 Estado de conexión:', data);
+        console.log('📊 Estado de conexión recibido:', data);
         if (data.ssl_enabled) {
             logToWS('✅ Conexión segura SSL establecida');
         }
     });
 
-    // ... (el resto de tus event listeners permanecen igual)
-    socket.on('demo_scheduled_' + DEVICE_NAME, (data) => {
-        console.log('🎭 Demo programada:', data);
-        logToWS(`Demo programada con ${data.movimientos_programados?.length || 0} movimientos`);
-        
-        if (data.movimientos_programados && data.movimientos_programados.length > 0) {
-            const secuenciaId = data.ejecucion?.secuencia_id || data.ejecucion?.id;
-            if (secuenciaId) {
-                setTimeout(() => {
-                    iniciarMonitoreoSecuencia(secuenciaId, data.movimientos_programados);
-                }, 1000);
-            }
-        }
-    });
-
-    // Mantén todos tus otros event listeners aquí...
-    socket.on('movement_created', (data) => {
-        console.log('🆕 Nuevo movimiento creado:', data);
-    });
-
     socket.on('movement_update', (data) => {
         console.log('📡 Movimiento actualizado via WS:', data);
-        handleMovementEvent(data.data || data);
+        if (data && data.data) {
+            handleMovementEvent(data.data);
+        } else if (data) {
+            handleMovementEvent(data);
+        }
     });
 
     socket.on('obstacle_update', (data) => {
         console.log('📡 Obstáculo actualizado via WS:', data);
-        handleObstacleEvent(data.data || data);
+        if (data && data.data) {
+            handleObstacleEvent(data.data);
+        } else if (data) {
+            handleObstacleEvent(data);
+        }
     });
 
     socket.on('immediate_movement_response', (data) => {
         console.log('🎯 Movimiento inmediato recibido:', data);
-        handleMovementEvent(data.data || data);
+        if (data && data.data) {
+            handleMovementEvent(data.data);
+        }
     });
 
     socket.on('immediate_obstacle_response', (data) => {
         console.log('🎯 Obstáculo inmediato recibido:', data);
-        handleObstacleEvent(data.data || data);
+        if (data && data.data) {
+            handleObstacleEvent(data.data);
+        }
     });
 
     socket.on('subscription_confirmed', (data) => {
         console.log('✅ Suscripción confirmada:', data);
-        logToWS(`Suscripción activa: ${data.type} para ${data.device_name}`);
+        logToWS(`✅ Suscripción activa: ${data.type} para ${data.device_name}`);
         isMonitoringActive = true;
+    });
+
+    socket.on('demo_scheduled', (data) => {
+        console.log('🎭 Demo programada recibida:', data);
+        handleDemoScheduled(data);
+    });
+
+    socket.on('demo_scheduled_' + DEVICE_NAME, (data) => {
+        console.log('🎭 Demo programada específica recibida:', data);
+        handleDemoScheduled(data);
     });
 
     socket.on('error', (error) => {
         console.error('❌ Error via WebSocket:', error);
-        showAlert(`Error: ${error.message || 'Error en comunicación'}`, 'danger');
-        logToWS(`Error: ${error.message || 'Error desconocido'}`);
+        showAlert(`Error WS: ${error.message || 'Error en comunicación'}`, 'danger');
+        logToWS(`❌ Error: ${error.message || 'Error desconocido'}`);
+    });
+
+    socket.on('pong', (data) => {
+        console.log('🏓 Pong recibido:', data);
+        logToWS('✅ Latencia WebSocket verificada');
+    });
+
+    // Test de conexión después de conectar
+    socket.on('connect', () => {
+        setTimeout(() => {
+            if (socket.connected) {
+                console.log('🏓 Enviando ping de prueba...');
+                socket.emit('ping');
+            }
+        }, 2000);
     });
 }
 
+// AGREGAR esta nueva función para manejar demos programadas
+function handleDemoScheduled(data) {
+    console.log('🎭 Procesando demo programada:', data);
+    
+    if (data && data.movimientos_programados && data.movimientos_programados.length > 0) {
+        const secuenciaId = data.ejecucion?.secuencia_id || data.ejecucion?.id;
+        if (secuenciaId) {
+            console.log(`🚀 Iniciando monitoreo de secuencia ID: ${secuenciaId}`);
+            setTimeout(() => {
+                iniciarMonitoreoSecuencia(secuenciaId, data.movimientos_programados);
+            }, 1000);
+        }
+    } else {
+        console.warn('⚠️ Demo programada sin movimientos válidos:', data);
+    }
+}
 
 function iniciarMonitoreoSecuencia(secuenciaId, movimientosProgramados) {
     if (!movimientosProgramados || movimientosProgramados.length === 0) {
@@ -575,19 +662,38 @@ function cancelarEvasionYContinuar() {
 
 function subscribeToMonitoring() {
     if (socket && socket.connected) {
-        // Suscribirse a monitoreo automático cada 0.5 segundos
+        console.log('📡 Enviando suscripciones para:', DEVICE_NAME);
+        
+        // Suscribirse a monitoreo automático
         socket.emit('subscribe_movements', { device_name: DEVICE_NAME });
         socket.emit('subscribe_obstacles', { device_name: DEVICE_NAME });
-        console.log('📡 Suscripciones enviadas para monitoreo automático');
+        
+        console.log('✅ Suscripciones enviadas para monitoreo automático');
+        
+        // Verificar que se enviaron
+        setTimeout(() => {
+            if (socket.connected) {
+                console.log('✅ Socket sigue conectado después de suscripciones');
+            }
+        }, 1000);
+    } else {
+        console.error('❌ No se pueden enviar suscripciones - Socket no conectado');
+        // Intentar reconectar
+        setTimeout(() => connectWebSocket(), 2000);
     }
 }
 
 function requestImmediateData() {
     if (socket && socket.connected) {
+        console.log('🎯 Solicitando datos inmediatos para:', DEVICE_NAME);
+        
         // Solicitar datos inmediatos al conectar
         socket.emit('get_immediate_movement', { device_name: DEVICE_NAME });
         socket.emit('get_immediate_obstacle', { device_name: DEVICE_NAME });
-        console.log('🎯 Solicitados datos inmediatos via WebSocket');
+        
+        console.log('✅ Solicitudes de datos inmediatos enviadas');
+    } else {
+        console.error('❌ No se pueden solicitar datos - Socket no conectado');
     }
 }
 
@@ -744,8 +850,14 @@ async function postData(endpoint, data) {
                 'Accept': 'application/json'
             },
             body: JSON.stringify(data),
-            mode: 'cors',  // Agregar explícitamente
-            credentials: 'omit'  // No enviar cookies
+            mode: 'cors',
+            credentials: 'omit'
+            // ════════════════════════════════════════════════════
+            // CONFIGURACIÓN LOCAL (COMENTADA) - DESCOMENTAR PARA DESARROLLO LOCAL
+            /*
+            mode: 'no-cors',  // Para desarrollo local sin CORS
+            */
+            // ════════════════════════════════════════════════════
         });
 
         if (!response.ok) {
@@ -771,6 +883,12 @@ async function fetchData(endpoint) {
             },
             mode: 'cors',
             credentials: 'omit'
+            // ════════════════════════════════════════════════════
+            // CONFIGURACIÓN LOCAL (COMENTADA) - DESCOMENTAR PARA DESARROLLO LOCAL
+            /*
+            mode: 'no-cors',  // Para desarrollo local sin CORS
+            */
+            // ════════════════════════════════════════════════════
         });
 
         if (!response.ok) {
@@ -1046,62 +1164,41 @@ function verEstadoCarrito() {
 // --- MODIFICAR la inicialización para resetear estado ---
 
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('🚀 Inicializando aplicación IoT Carrito...');
+    console.log('🚀 Inicializando aplicación IoT Carrito para AWS...');
     
-    // DETECCIÓN MEJORADA DE ENTORNO
-    const isGitHubPages = window.location.hostname.includes('github.io');
-    console.log(`📍 Entorno detectado: ${isGitHubPages ? 'GitHub Pages' : 'Desarrollo Local'}`);
+    // CONFIGURACIÓN AWS
+    console.log('📍 Entorno: AWS EC2 Instance');
+    console.log('🔗 API URL:', API_BASE_URL);
+    console.log('🔗 WebSocket URL:', WS_BASE_URL);
     
-    if (isGitHubPages) {
-        console.log('🔒 Modo seguro: Usando HTTPS/WSS');
-        showAlert('🔒 Conectando de forma segura desde GitHub Pages', 'info');
-    } else {
-        console.log('🔓 Modo desarrollo: Usando HTTP/WS');
-    }
+    showAlert('🔗 Conectando a instancia AWS EC2...', 'info');
 
-    // Esconder el resultado del obstáculo inicialmente
+    // Inicializar estado
     const obstRes = document.getElementById('obstacleResult');
     if (obstRes) obstRes.classList.add('hidden');
 
-    // Inicializar caches y estado
     movementCache = [];
     obstacleCache = [];
     carritoEstado = {
         moviendose: false,
         movimientoActual: null,
         timeoutMovimiento: null,
-        duracionMovimiento: 2000 // 1 segundo
+        duracionMovimiento: 2000
     };
 
-    // Configurar displays iniciales
     clearMonitoringDisplays();
 
-    // Inicializar ubicación real primero
-    inicializarUbicacionReal().then(() => {
-        console.log('📍 Ubicación inicializada:', ubicacionReal);
-        
-        // Conectar WebSockets (esto iniciará el monitoreo automático)
-        connectWebSocket();
+    // Iniciar conexión WebSocket INMEDIATAMENTE
+    console.log('🔄 Iniciando conexión WebSocket...');
+    connectWebSocket();
+    
+    // Cargar datos después de 3 segundos (dar tiempo a WebSocket)
+    setTimeout(() => {
+        loadMovementLogs();
+        loadObstacleLogs();
+    }, 3000);
 
-        // Cargar datos iniciales via REST (como fallback/backup)
-        setTimeout(() => {
-            loadMovementLogs();
-            loadObstacleLogs();
-        }, 1000);
-
-        console.log('✅ Aplicación inicializada. WebSockets activos para monitoreo en tiempo real.');
-        console.log('⏱️ Duración fija configurada: 1000ms para Adelante/Atrás');
-    }).catch(error => {
-        console.error('Error inicializando ubicación:', error);
-        // Continuar incluso si falla la ubicación
-        connectWebSocket();
-        
-        // Cargar datos incluso sin ubicación
-        setTimeout(() => {
-            loadMovementLogs();
-            loadObstacleLogs();
-        }, 1000);
-    });
+    console.log('✅ Aplicación inicializada. WebSocket iniciado.');
 });
 // --- 5. Manejo de Eventos WebSocket para Monitoreo ---
 
@@ -1405,3 +1502,52 @@ function makeClickable() {
         });
     });
 }
+
+// Función de diagnóstico WebSocket
+function diagnoseWebSocket() {
+    console.log('🔍 DIAGNÓSTICO WEBSOCKET:');
+    console.log('📡 URL WebSocket:', WS_BASE_URL);
+    console.log('🔗 Socket conectado:', socket?.connected);
+    console.log('🆔 Socket ID:', socket?.id);
+    console.log('📊 Estado monitoreo:', isMonitoringActive);
+    console.log('📋 Dispositivo:', DEVICE_NAME);
+    
+    // Test de conexión básica
+    if (socket && socket.connected) {
+        console.log('✅ WebSocket parece conectado');
+        socket.emit('ping');
+    } else {
+        console.log('❌ WebSocket NO conectado');
+    }
+}
+
+// Llamar desde la consola del navegador para diagnosticar
+window.diagnoseWS = diagnoseWebSocket;
+
+// Función de prueba manual de WebSocket
+function testWebSocketConnection() {
+    console.log('🧪 TEST MANUAL DE WEBSOCKET');
+    console.log('1. URL WebSocket:', WS_BASE_URL);
+    console.log('2. Socket existe:', !!socket);
+    console.log('3. Socket conectado:', socket?.connected);
+    console.log('4. Socket ID:', socket?.id);
+    console.log('5. Dispositivo:', DEVICE_NAME);
+    
+    if (socket && socket.connected) {
+        console.log('✅ Socket conectado - Enviando ping...');
+        socket.emit('ping');
+        
+        console.log('✅ Solicitando datos inmediatos...');
+        socket.emit('get_immediate_movement', { device_name: DEVICE_NAME });
+        socket.emit('get_immediate_obstacle', { device_name: DEVICE_NAME });
+        
+        showAlert('WebSocket funcionando correctamente', 'success');
+    } else {
+        console.log('❌ Socket NO conectado - Reiniciando conexión...');
+        connectWebSocket();
+    }
+}
+
+// Hacerla disponible globalmente para pruebas
+window.testWS = testWebSocketConnection;
+window.connectWS = connectWebSocket;
