@@ -4,11 +4,11 @@ const isGitHubPages = window.location.hostname.includes('github.io');
 
 // URLs según el entorno - REEMPLAZA 100.26.151.211 CON TU IP DE AWS
 const API_BASE_URL = isGitHubPages 
-    ? 'https://100.26.151.211:5500/api'  // HTTPS para GitHub Pages
+    ? 'https://100.26.151.211:443/api'  // HTTPS para GitHub Pages
     : 'http://127.0.0.1:5500/api';  // HTTP para desarrollo local
 
 const WS_BASE_URL = isGitHubPages 
-    ? 'https://100.26.151.211:5500'      // WSS para GitHub Pages  
+    ? 'https://100.26.151.211:443'      // WSS para GitHub Pages  
     : 'http://127.0.0.1:5500';      // WS para desarrollo local
 
 console.log(`🌐 Entorno: ${isGitHubPages ? 'GitHub Pages (HTTPS)' : 'Desarrollo Local (HTTP)'}`);
@@ -58,72 +58,6 @@ async function obtenerIP() {
     } catch (error) {
         console.warn('No se pudo obtener la IP:', error);
         return 'Desconocida';
-    }
-}
-
-// Función para obtener ubicación geográfica
-async function obtenerUbicacion() {
-    return new Promise((resolve, reject) => {
-        if (!navigator.geolocation) {
-            reject(new Error('Geolocalización no soportada'));
-            return;
-        }
-
-        navigator.geolocation.getCurrentPosition(
-            (position) => {
-                resolve({
-                    lat: position.coords.latitude,
-                    lon: position.coords.longitude,
-                    accuracy: position.coords.accuracy
-                });
-            },
-            (error) => {
-                console.warn('Error obteniendo ubicación:', error);
-                reject(error);
-            },
-            {
-                enableHighAccuracy: true,
-                timeout: 10000,
-                maximumAge: 60000
-            }
-        );
-    });
-}
-
-// Función principal para inicializar datos de ubicación
-async function inicializarUbicacionReal() {
-    try {
-        // Obtener IP pública
-        ubicacionReal.ip = await obtenerIP();
-        
-        // Obtener geolocalización por IP
-        const geoData = await obtenerGeolocalizacionPorIP(ubicacionReal.ip);
-        ubicacionReal.pais = geoData.pais;
-        ubicacionReal.ciudad = geoData.ciudad;
-        
-        // Intentar obtener ubicación GPS precisa
-        try {
-            const gpsData = await obtenerUbicacion();
-            ubicacionReal.lat = gpsData.lat;
-            ubicacionReal.lon = gpsData.lon;
-        } catch (gpsError) {
-            // Fallback a datos de IP para coordenadas
-            if (geoData.lat_ip && geoData.lon_ip) {
-                ubicacionReal.lat = geoData.lat_ip;
-                ubicacionReal.lon = geoData.lon_ip;
-                console.log('Usando coordenadas aproximadas por IP');
-            }
-        }
-        
-// Actualizar timestamp en hora local
-ubicacionReal.timestamp = obtenerTimestampActual();        
-        console.log('📍 Ubicación real obtenida:', ubicacionReal);
-        return ubicacionReal;
-    } catch (error) {
-        console.error('Error inicializando ubicación:', error);
-        // Datos por defecto mínimos
-        ubicacionReal.timestamp = new Date().toISOString();
-        return ubicacionReal;
     }
 }
 
@@ -1446,19 +1380,6 @@ function repeatDemo(secuencia_id) {
     });
 }
 
-// Función para actualizar la ubicación periódicamente (opcional)
-function iniciarActualizacionUbicacion() {
-    // Actualizar cada 5 minutos
-    setInterval(async () => {
-        try {
-            await inicializarUbicacionReal();
-            console.log('📍 Ubicación actualizada:', ubicacionReal);
-        } catch (error) {
-            console.warn('Error actualizando ubicación:', error);
-        }
-    }, 5 * 60 * 1000); // 5 minutos
-}
-
 // Llamar esta función después de la inicialización si quieres ubicación en tiempo real
 function actualizarUIUbicacion() {
     const ubicacionDiv = document.getElementById('ubicacionActual');
@@ -1472,7 +1393,6 @@ function actualizarUIUbicacion() {
     `;
 }
 
-// Llamar esta función después de inicializarUbicacionReal()
 // Función utilitaria para hacer elementos clickeables
 function makeClickable() {
     document.querySelectorAll('.demo-item').forEach(item => {
