@@ -90,29 +90,6 @@ async function obtenerUbicacion() {
     });
 }
 
-// Función para obtener datos de geolocalización basados en IP
-async function obtenerGeolocalizacionPorIP(ip) {
-    if (ip === 'Desconocida') return { pais: 'Desconocido', ciudad: 'Desconocida' };
-    
-    try {
-        const response = await fetch(`http://ip-api.com/json/${ip}?fields=status,country,countryCode,city,lat,lon&lang=es`);
-        const data = await response.json();
-        
-        if (data.status === 'success') {
-            return {
-                pais: data.country,
-                ciudad: data.city,
-                lat_ip: data.lat,
-                lon_ip: data.lon
-            };
-        }
-        return { pais: 'Desconocido', ciudad: 'Desconocida' };
-    } catch (error) {
-        console.warn('Error obteniendo geolocalización por IP:', error);
-        return { pais: 'Desconocido', ciudad: 'Desconocida' };
-    }
-}
-
 // Función principal para inicializar datos de ubicación
 async function inicializarUbicacionReal() {
     try {
@@ -804,7 +781,6 @@ function formatLogData(data, isList = false) {
             </p>
             <p class="small text-secondary mb-0 ps-3">
                 <i class="bi bi-clock me-1"></i>${timeDetail}
-                ${locationDetail ? `<br><i class="bi bi-geo-alt me-1"></i>${locationDetail}` : ''}
                 ${item.lat && item.lon ? `<br><i class="bi bi-pin-map me-1"></i>${item.lat.toFixed(4)}, ${item.lon.toFixed(4)}` : ''}
             </p>
             ${item.id ? `<p class="small text-muted mb-0 ps-3">ID: ${item.id}</p>` : ''}
