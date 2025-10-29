@@ -1,0 +1,106 @@
+/* Variables de Color Personalizadas */
+:root {
+    --primary-color: #0d6efd; /* Azul de Bootstrap */
+    --bg-color: #0a0a2a;      /* Fondo Principal muy oscuro */
+    --card-bg-color: #1a1a3a; /* Fondo para tarjetas (más oscuro que secondary) */
+    --secondary-bg-color: #2a2a4a; /* Fondo para logs/listas */
+    --text-primary: #e0f2fe; /* Azul claro para texto */
+}
+
+/* Aplicación de Fondo General */
+body {
+    background-color: var(--bg-color);
+    font-family: 'Inter', sans-serif; /* Asumiendo la disponibilidad de Inter o un fallback similar */
+}
+
+/* Color primario para texto */
+.text-primary {
+    color: var(--primary-color) !important;
+}
+
+/* Clases de Fondo para Elementos (Look Tecnológico) */
+.bg-darker-custom {
+    background-color: var(--card-bg-color) !important;
+    border: 1px solid #333366;
+}
+
+.bg-secondary-custom {
+    background-color: var(--secondary-bg-color) !important;
+}
+
+/* Estilo para Cajas de Log */
+.log-box-custom {
+    background-color: var(--secondary-bg-color);
+    padding: 1rem;
+    border-radius: 0.5rem;
+    font-family: monospace;
+    font-size: 0.85rem;
+    line-height: 1.4;
+    color: #00ffaa; /* Tono verde brillante para logs */
+    max-height: 400px;
+    overflow-y: auto;
+    border: 1px solid #333366;
+}
+
+/* Estilo para Botones de Control */
+.btn-control {
+    font-weight: 600;
+    transition: all 0.2s ease-in-out;
+    border-radius: 0.75rem; /* Bordes más redondeados */
+}
+
+.btn-control:hover {
+    transform: scale(1.05);
+    box-shadow: 0 0 15px rgba(13, 110, 253, 0.5); /* Sombra de neón */
+}
+
+/* Estilo para elementos de lista de Demo */
+.demo-item {
+    cursor: pointer;
+    padding: 0.75rem;
+    margin-bottom: 0.5rem;
+    border-radius: 0.5rem;
+    background-color: #3a3a5e; /* Un tono intermedio */
+    border: 1px solid #4a4a7a;
+    transition: background-color 0.15s ease, transform 0.15s ease;
+}
+
+.demo-item:hover {
+    background-color: #0d6efd; /* Color primario al pasar el mouse */
+    color: white;
+    transform: translateY(-2px);
+}
+
+/* Estilo para las pestañas de navegación */
+.nav-link {
+    color: #9aa5b1;
+    border-bottom: 2px solid transparent;
+}
+
+.nav-link.active {
+    color: var(--text-primary) !important;
+    background-color: transparent !important;
+    border-color: var(--primary-color) !important;
+    font-weight: bold;
+}
+
+/* Agregar estas clases CSS */
+.hidden {
+    display: none !important;
+}
+
+.log-box-custom {
+    background-color: #1a1a1a;
+    border: 1px solid #333;
+    border-radius: 0.375rem;
+    padding: 1rem;
+}
+
+.progress-bar-animated {
+    animation: progress-bar-stripes 1s linear infinite;
+}
+
+@keyframes progress-bar-stripes {
+    0% { background-position: 1rem 0; }
+    100% { background-position: 0 0; }
+}

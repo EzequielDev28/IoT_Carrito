@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Control de Carrito IoT - Centro de Mando</title>
+    <!-- Bootstrap 5 CDN -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+    <!-- Estilos Personalizados (Look Tecnológico) -->
+    <link rel="stylesheet" href="css/styles.css">
+    <!-- Carga de Iconos (Bootstrap Icons) -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
+    <!-- Carga de Socket.IO para WebSockets -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
+</head>
+<body class="bg-dark text-light">
+
+    <!-- Sistema de Alertas/Mensajes (Mostrará pop-ups) -->
+    <div id="alertContainer" class="position-fixed top-0 end-0 p-3" style="z-index: 1050;"></div>
+
+    <div class="container-fluid py-4 max-w-7xl mx-auto">
+        <header class="text-center mb-5">
+            <h1 class="display-5 fw-bold text-primary tracking-wider">
+                <i class="bi bi-robot me-3"></i>Centro de Mando IoT: Carrito Alpha
+            </h1>
+            <div class="mt-3 d-flex justify-content-center align-items-center">
+                <label for="deviceInput" class="text-secondary me-3">Dispositivo ID:</label>
+                <input type="text" id="deviceInput" value="carrito-alpha" class="form-control bg-secondary text-light border-0 w-auto" onchange="updateDeviceName(this.value)">
+            </div>
+        </header>
+
+        <!-- Pestañas de Navegación -->
+        <ul class="nav nav-tabs justify-content-center mb-4" id="mainTab" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" id="command-tab" data-bs-toggle="tab" data-bs-target="#command" type="button" role="tab" aria-controls="command" aria-selected="true" onclick="changeTab('command')">
+                    <i class="bi bi-controller me-2"></i>Control & Demos
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" id="monitor-tab" data-bs-toggle="tab" data-bs-target="#monitor" type="button" role="tab" aria-controls="monitor" aria-selected="false" onclick="changeTab('monitor')">
+                    <i class="bi bi-activity me-2"></i>Monitoreo & Logs
+                </button>
+            </li>
+        </ul>
+
+        <!-- Contenido de las Pestañas -->
+        <div class="tab-content" id="mainTabContent">
+            <!-- Pestaña 1: Control y Comandos -->
+            <div class="tab-pane fade show active" id="command" role="tabpanel" aria-labelledby="command-tab">
+                <div class="row g-4">
+                    
+                    <!-- Columna 1: Control Remoto -->
+                    <div class="col-lg-4">
+                        <div class="card bg-darker-custom shadow-lg h-100">
+                            <div class="card-body">
+                                <h5 class="card-title text-primary border-bottom border-secondary pb-2 mb-3">Control Manual (Operaciones)</h5>
+                                <div id="controlGrid" class="row g-2 text-center">
+                                    
+                                    <!-- Fila 1: Adelante y Vueltas en Movimiento -->
+                                    <div class="col-3"></div>
+                                    <div class="col-6"><button class="btn btn-primary btn-control w-100" data-op="Adelante" onclick="sendMovement(1)"><i class="bi bi-arrow-up"></i> Adelante</button></div>
+                                    <div class="col-3"></div>
+
+                                    <!-- Fila 2: Vueltas Adelante -->
+                                    <div class="col-6"><button class="btn btn-primary btn-control w-100" data-op="Vuelta adelante izquierda" onclick="sendMovement(5)"><i class="bi bi-corner-left-up"></i> V. Adelante Izq</button></div>
+                                    <div class="col-6"><button class="btn btn-primary btn-control w-100" data-op="Vuelta adelante derecha" onclick="sendMovement(4)"><i class="bi bi-corner-right-up"></i> V. Adelante Der</button></div>
+
+                                    <!-- Fila 3: Giros 90 / Detener -->
+                                    <div class="col-3"><button class="btn btn-primary btn-control w-100" data-op="Giro 90° izquierda" onclick="sendMovement(9)"><i class="bi bi-arrow-counterclockwise"></i> 90° Izq</button></div>
+                                    <div class="col-6"><button class="btn btn-danger btn-control w-100" data-op="Detener" onclick="sendMovement(3)"><i class="bi bi-stop-fill"></i> Detener</button></div>
+                                    <div class="col-3"><button class="btn btn-primary btn-control w-100" data-op="Giro 90° derecha" onclick="sendMovement(8)"><i class="bi bi-arrow-clockwise"></i> 90° Der</button></div>
+
+                                    <!-- Fila 4: Giros 360 -->
+                                    <div class="col-6"><button class="btn btn-primary btn-control w-100" data-op="Giro 360° izquierda" onclick="sendMovement(11)"><i class="bi bi-arrow-repeat"></i> 360° Izq</button></div>
+                                    <div class="col-6"><button class="btn btn-primary btn-control w-100" data-op="Giro 360° derecha" onclick="sendMovement(10)"><i class="bi bi-arrow-repeat"></i> 360° Der</button></div>
+
+                                    <!-- Fila 5: Atrás -->
+                                    <div class="col-3"></div>
+                                    <div class="col-6"><button class="btn btn-warning btn-control w-100 text-dark" data-op="Atras" onclick="sendMovement(2)"><i class="bi bi-arrow-down"></i> Atrás</button></div>
+                                    <div class="col-3"></div>
+
+                                    <!-- Fila 6: Vueltas Atrás -->
+                                    <div class="col-6"><button class="btn btn-warning btn-control w-100 text-dark" data-op="Vuelta atrás izquierda" onclick="sendMovement(7)"><i class="bi bi-corner-left-down"></i> V. Atrás Izq</button></div>
+                                    <div class="col-6"><button class="btn btn-warning btn-control w-100 text-dark" data-op="Vuelta atrás derecha" onclick="sendMovement(6)"><i class="bi bi-corner-right-down"></i> V. Atrás Der</button></div>
+
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Columna 2: Inserción de Obstáculos -->
+                    <div class="col-lg-4">
+                        <div class="card bg-darker-custom shadow-lg h-100">
+                            <div class="card-body">
+                                <h5 class="card-title text-primary border-bottom border-secondary pb-2 mb-3">Simulación de Obstáculos</h5>
+                                <p class="card-text text-secondary">Registra la detección de un obstáculo para obtener la acción sugerida.</p>
+                                <div class="d-grid gap-3">
+                                    <button class="btn btn-warning btn-control w-100 text-dark" data-obst="Adelante" onclick="sendObstacle(1)">
+                                        <i class="bi bi-cone-striped me-2"></i>Obstáculo al Frente (1)
+                                    </button>
+                                    <button class="btn btn-warning btn-control w-100 text-dark" data-obst="Adelante-Izquierda" onclick="sendObstacle(2)">
+                                        <i class="bi bi-arrow-up-left-circle me-2"></i>Frente-Izquierda (2)
+                                    </button>
+                                    <button class="btn btn-warning btn-control w-100 text-dark" data-obst="Adelante-Derecha" onclick="sendObstacle(3)">
+                                        <i class="bi bi-arrow-up-right-circle me-2"></i>Frente-Derecha (3)
+                                    </button>
+                                    <button class="btn btn-warning btn-control w-100 text-dark" data-obst="Adelante-Izquierda-Derecha" onclick="sendObstacle(4)">
+                                        <i class="bi bi-triangle-half me-2"></i>Múltiples Frentes (4)
+                                    </button>
+                                    <button class="btn btn-warning btn-control w-100 text-dark" data-obst="Retrocede" onclick="sendObstacle(5)">
+                                        <i class="bi bi-arrow-down-circle me-2"></i>Obstáculo Atrás (5)
+                                    </button>
+                                </div>
+                                <div id="obstacleResult" class="mt-4 p-3 bg-secondary text-primary rounded-lg hidden">
+                                    <!-- Resultado de la sugerencia del obstáculo -->
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Columna 3: Demos y Secuencias -->
+                    <div class="col-lg-4">
+                        <div class="card bg-darker-custom shadow-lg h-100">
+                            <div class="card-body">
+                                <h5 class="card-title text-primary border-bottom border-secondary pb-2 mb-3">Secuencias DEMO</h5>
+
+                                <h6 class="text-info fw-bold mt-3">Crear Secuencia Aleatoria</h6>
+                                <div class="p-3 bg-secondary-custom rounded-lg mb-4">
+                                    <input type="number" id="nPasos" placeholder="N° Pasos (Ej: 8)" value="8" min="1" class="form-control bg-dark text-light border-0 mb-2">
+                                    <div class="d-flex gap-2 mb-2">
+                                        <input type="number" id="minMs" placeholder="Min Ms (Ej: 500)" value="500" min="100" class="form-control bg-dark text-light border-0">
+                                        <input type="number" id="maxMs" placeholder="Max Ms (Ej: 1200)" value="1200" min="100" class="form-control bg-dark text-light border-0">
+                                    </div>
+                                    <div class="form-check mb-2">
+                                        <input class="form-check-input bg-dark border-secondary" type="checkbox" value="" id="excluirDetener" checked>
+                                        <label class="form-check-label text-secondary" for="excluirDetener">Excluir "Detener" (Clave 3)</label>
+                                    </div>
+                                    <button class="btn btn-success btn-sm w-100" onclick="createRandomDemo()"><i class="bi bi-shuffle me-2"></i>Crear Demo Aleatorio</button>
+                                </div>
+
+                                <h6 class="text-info fw-bold mt-3">Crear Secuencia Manual</h6>
+<div class="p-3 bg-secondary-custom rounded-lg mb-4">
+    <div id="manualDemoBuilder">
+        <div class="d-flex gap-2 mb-2">
+            <select id="manualOpSelect" class="form-select bg-dark text-light border-0">
+                <option value="1">Adelante (1)</option>
+                <option value="2">Atrás (2)</option>
+                <option value="3">Detener (3)</option>
+                <option value="4">Vuelta adelante derecha (4)</option>
+                <option value="5">Vuelta adelante izquierda (5)</option>
+                <option value="6">Vuelta atrás derecha (6)</option>
+                <option value="7">Vuelta atrás izquierda (7)</option>
+                <option value="8">Giro 90° derecha (8)</option>
+                <option value="9">Giro 90° izquierda (9)</option>
+                <option value="10">Giro 360° derecha (10)</option>
+                <option value="11">Giro 360° izquierda (11)</option>
+            </select>
+            <input type="number" id="manualDurInput" class="form-control bg-dark text-light border-0" placeholder="Duración (ms)" min="100" value="1000">
+        </div>
+        <div class="d-flex gap-2">
+            <button class="btn btn-success btn-sm flex-fill" onclick="addManualStep()">
+                <i class="bi bi-plus-circle me-1"></i>Agregar Paso
+            </button>
+            <button class="btn btn-danger btn-sm flex-fill" onclick="clearManualSteps()">
+                <i class="bi bi-trash3 me-1"></i>Limpiar
+            </button>
+        </div>
+
+        <div id="manualStepsPreview" class="mt-3 p-2 bg-dark rounded text-light small" style="max-height: 150px; overflow-y: auto;">
+            <p class="text-secondary small">Aún no hay pasos agregados.</p>
+        </div>
+
+        <button class="btn btn-primary btn-sm w-100 mt-3" onclick="finalizeManualDemo()">
+            <i class="bi bi-check2-circle me-2"></i>Finalizar Demo Manual
+        </button>
+    </div>
+</div>
+
+
+                                <h6 class="text-info fw-bold mt-3">Ejecutar Secuencias Existentes</h6>
+                                <button class="btn btn-secondary btn-sm w-100 mb-3" onclick="loadLast20Demos()">
+                                    <i class="bi bi-arrow-repeat me-2"></i>Cargar Últimas 20 Demos
+                                </button>
+                                <div id="demoList" class="log-box-custom overflow-auto p-2" style="max-height: 200px;">
+                                    <p class="text-secondary text-sm">Presiona el botón de arriba para cargar las secuencias.</p>
+                                </div>
+                                <p class="text-secondary text-xs mt-2">Click en una secuencia para **REPETIRLA**.</p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Pestaña 2: Monitoreo y Logs -->
+            <div class="tab-pane fade" id="monitor" role="tabpanel" aria-labelledby="monitor-tab">
+                <div class="row g-4">
+                    <!-- Logs de Movimientos -->
+                    <div class="col-lg-6">
+                        <div class="card bg-darker-custom shadow-lg h-100">
+                            <div class="card-body">
+                                <h5 class="card-title text-primary border-bottom border-secondary pb-2 mb-3 d-flex justify-content-between align-items-center">
+                                    Registro de Movimientos (Log)
+                                    <button class="btn btn-sm btn-info" onclick="loadMovementLogs()"><i class="bi bi-arrow-clockwise"></i> Refrescar</button>
+                                </h5>
+                                
+                                <h6 class="text-light fw-bold">Último Movimiento</h6>
+                                <div id="lastMovement" class="log-box-custom mb-3"></div>
+
+                                <h6 class="text-light fw-bold">Últimos 10 Movimientos</h6>
+                                <div id="last10Movements" class="log-box-custom" style="max-height: 250px;"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Logs de Obstáculos y WS -->
+                    <div class="col-lg-6">
+                        <div class="card bg-darker-custom shadow-lg h-100">
+                            <div class="card-body">
+                                <h5 class="card-title text-primary border-bottom border-secondary pb-2 mb-3 d-flex justify-content-between align-items-center">
+                                    Registro de Obstáculos (Log)
+                                    <button class="btn btn-sm btn-info" onclick="loadObstacleLogs()"><i class="bi bi-arrow-clockwise"></i> Refrescar</button>
+                                </h5>
+
+                                <h6 class="text-light fw-bold">Último Obstáculo</h6>
+                                <div id="lastObstacle" class="log-box-custom mb-3"></div>
+                                
+                                <h6 class="text-light fw-bold">Últimos 10 Obstáculos</h6>
+                                <div id="last10Obstacles" class="log-box-custom" style="max-height: 250px;"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Sección de WebSockets -->
+                    <div class="col-12 mt-4">
+                        <div class="card bg-darker-custom shadow-lg">
+                            <div class="card-body">
+                                <h5 class="card-title text-primary border-bottom border-secondary pb-2 mb-3">
+                                    WebSockets (Notificaciones de Demo)
+                                </h5>
+                                <p class="text-light small">Estado: <span id="wsStatus" class="fw-bold text-danger">Desconectado</span></p>
+                                <div id="wsLog" class="log-box-custom text-info" style="max-height: 150px;">
+                                    <p class="text-secondary small">Esperando conexión...</p>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- En la pestaña de Monitoreo, después de la sección de WebSockets -->
+<div class="col-12 mt-4">
+    <div class="card bg-darker-custom shadow-lg">
+        <div class="card-body">
+            <h5 class="card-title text-primary border-bottom border-secondary pb-2 mb-3 d-flex justify-content-between align-items-center">
+                <span>Ejecución de Secuencias en Tiempo Real</span>
+                <button class="btn btn-sm btn-danger" onclick="limpiarEjecucionSecuencia()">
+                    <i class="bi bi-x-circle me-1"></i>Limpiar
+                </button>
+            </h5>
+            
+            <!-- Información de la secuencia actual -->
+            <div id="secuenciaInfo" class="mb-3 p-3 bg-secondary rounded hidden">
+                <div class="row">
+                    <div class="col-md-6">
+                        <strong class="text-warning">Secuencia ID:</strong> 
+                        <span id="secuenciaIdActual">-</span>
+                    </div>
+                    <div class="col-md-6">
+                        <strong class="text-warning">Total Pasos:</strong> 
+                        <span id="totalPasosSecuencia">-</span>
+                    </div>
+                    <div class="col-md-6">
+                        <strong class="text-warning">Paso Actual:</strong> 
+                        <span id="pasoActualSecuencia">-</span>
+                    </div>
+                    <div class="col-md-6">
+                        <strong class="text-warning">Tiempo Restante:</strong> 
+                        <span id="tiempoRestanteSecuencia">-</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Barra de progreso -->
+            <div class="mb-3">
+                <div class="d-flex justify-content-between text-light small mb-1">
+                    <span>Progreso de la secuencia</span>
+                    <span id="progresoTexto">0%</span>
+                </div>
+                <div class="progress" style="height: 8px;">
+                    <div id="barraProgresoSecuencia" class="progress-bar progress-bar-striped progress-bar-animated" 
+                         role="progressbar" style="width: 0%"></div>
+                </div>
+            </div>
+
+            <!-- Log de ejecución en tiempo real -->
+            <h6 class="text-light fw-bold mb-2">Log de Ejecución</h6>
+            <div id="logEjecucionSecuencia" class="log-box-custom text-info" style="max-height: 250px; min-height: 150px;">
+                <p class="text-secondary small text-center mt-3">No hay secuencia en ejecución</p>
+            </div>
+        </div>
+    </div>
+</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Carga de Bootstrap JS Bundle -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- Lógica de la Aplicación -->
+    <script src="js/main.js"></script>
+</body>
+</html>
