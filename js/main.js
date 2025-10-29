@@ -1,6 +1,19 @@
 // --- 1. Configuración Global ACTUALIZADA ---
-const API_BASE_URL = 'http://100.26.151.211:5500/api';  // Backend en puerto 5500
-const WS_BASE_URL = 'http://100.26.151.211:5500';       // Backend en puerto 5500
+// DETECTAR SI ESTAMOS EN GITHUB PAGES O DESARROLLO LOCAL
+const isGitHubPages = window.location.hostname.includes('github.io');
+
+// URLs según el entorno - REEMPLAZA 100.26.151.211 CON TU IP DE AWS
+const API_BASE_URL = isGitHubPages 
+    ? 'https://100.26.151.211:5500/api'  // HTTPS para GitHub Pages
+    : 'http://127.0.0.1:5500/api';  // HTTP para desarrollo local
+
+const WS_BASE_URL = isGitHubPages 
+    ? 'https://100.26.151.211:5500'      // WSS para GitHub Pages  
+    : 'http://127.0.0.1:5500';      // WS para desarrollo local
+
+console.log(`🌐 Entorno: ${isGitHubPages ? 'GitHub Pages (HTTPS)' : 'Desarrollo Local (HTTP)'}`);
+console.log(`🔗 API: ${API_BASE_URL}`);
+console.log(`🔗 WebSocket: ${WS_BASE_URL}`);
 
 let DEVICE_NAME = document.getElementById('deviceInput').value || 'carrito-alpha';
 
@@ -211,10 +224,25 @@ function connectWebSocket() {
         socket.disconnect();
     }
 
-    socket = io(WS_BASE_URL, { 
+    // CONFIGURACIÓN MEJORADA PARA SSL
+    const socketOptions = {
         transports: ['websocket', 'polling'],
-        timeout: 2000
-    });
+        timeout: 5000,
+        reconnection: true,
+        reconnectionAttempts: 5,
+        reconnectionDelay: 1000
+    };
+
+    // AGREGAR CONFIGURACIÓN SSL SOLO PARA GITHUB PAGES
+    if (isGitHubPages) {
+        socketOptions.secure = true;
+        socketOptions.rejectUnauthorized = false; // Para certificados auto-firmados
+        console.log('🔒 Conectando con WebSocket seguro (WSS)');
+    } else {
+        console.log('🔓 Conectando con WebSocket normal (WS)');
+    }
+
+    socket = io(WS_BASE_URL, socketOptions);
 
     const wsStatus = document.getElementById('wsStatus');
 
@@ -245,48 +273,50 @@ function connectWebSocket() {
         wsStatus.textContent = 'Error de conexión';
         wsStatus.className = 'fw-bold text-warning';
         logToWS(`Error de conexión: ${error.message}`);
+        
+        // Mostrar ayuda específica para SSL
+        if (isGitHubPages && error.message.includes('SSL')) {
+            showAlert('Error SSL: Verifica que el servidor tenga certificados válidos', 'danger');
+        }
     });
 
-    // En connectWebSocket(), agregar este handler:
-socket.on('demo_scheduled_' + DEVICE_NAME, (data) => {
-    console.log('🎭 Demo programada:', data);
-    logToWS(`Demo programada con ${data.movimientos_programados?.length || 0} movimientos`);
-    
-    // Iniciar monitoreo automático si se programa una demo
-    if (data.movimientos_programados && data.movimientos_programados.length > 0) {
-        const secuenciaId = data.ejecucion?.secuencia_id || data.ejecucion?.id;
-        if (secuenciaId) {
-            setTimeout(() => {
-                iniciarMonitoreoSecuencia(secuenciaId, data.movimientos_programados);
-            }, 1000);
+    socket.on('connection_status', (data) => {
+        console.log('📊 Estado de conexión:', data);
+        if (data.ssl_enabled) {
+            logToWS('✅ Conexión segura SSL establecida');
         }
-    }
-});
+    });
 
-    // ==================== MANEJADORES DE EVENTOS WEBSOCKET ====================
-socket.on('movement_created', (data) => {
-    console.log('🆕 Nuevo movimiento creado:', data);
-    
-    // Si estamos monitoreando una secuencia, verificar si este movimiento pertenece a ella
-    if (ejecucionSecuencia.activa && data.data) {
-        // Podemos agregar log específico si es necesario
-        console.log('📋 Movimiento de secuencia detectado:', data.data);
-    }
-});
+    // ... (el resto de tus event listeners permanecen igual)
+    socket.on('demo_scheduled_' + DEVICE_NAME, (data) => {
+        console.log('🎭 Demo programada:', data);
+        logToWS(`Demo programada con ${data.movimientos_programados?.length || 0} movimientos`);
+        
+        if (data.movimientos_programados && data.movimientos_programados.length > 0) {
+            const secuenciaId = data.ejecucion?.secuencia_id || data.ejecucion?.id;
+            if (secuenciaId) {
+                setTimeout(() => {
+                    iniciarMonitoreoSecuencia(secuenciaId, data.movimientos_programados);
+                }, 1000);
+            }
+        }
+    });
 
-    // Monitoreo automático de movimientos
+    // Mantén todos tus otros event listeners aquí...
+    socket.on('movement_created', (data) => {
+        console.log('🆕 Nuevo movimiento creado:', data);
+    });
+
     socket.on('movement_update', (data) => {
         console.log('📡 Movimiento actualizado via WS:', data);
         handleMovementEvent(data.data || data);
     });
 
-    // Monitoreo automático de obstáculos
     socket.on('obstacle_update', (data) => {
         console.log('📡 Obstáculo actualizado via WS:', data);
         handleObstacleEvent(data.data || data);
     });
 
-    // Respuestas a consultas inmediatas
     socket.on('immediate_movement_response', (data) => {
         console.log('🎯 Movimiento inmediato recibido:', data);
         handleMovementEvent(data.data || data);
@@ -297,29 +327,12 @@ socket.on('movement_created', (data) => {
         handleObstacleEvent(data.data || data);
     });
 
-    // Confirmación de suscripciones
     socket.on('subscription_confirmed', (data) => {
         console.log('✅ Suscripción confirmada:', data);
         logToWS(`Suscripción activa: ${data.type} para ${data.device_name}`);
         isMonitoringActive = true;
     });
 
-    // Eventos de creación (para notificaciones)
-    socket.on('movement_created', (data) => {
-        console.log('🆕 Nuevo movimiento creado:', data);
-    });
-
-    socket.on('obstacle_created', (data) => {
-        console.log('🆕 Nuevo obstáculo creado:', data);
-    });
-
-    // Demos programadas
-    socket.on(`demo_scheduled_${DEVICE_NAME}`, (data) => {
-        console.log('🎭 Demo programada:', data);
-        logToWS(`Demo programada con ${data.movimientos_programados?.length || 0} movimientos`);
-    });
-
-    // Errores
     socket.on('error', (error) => {
         console.error('❌ Error via WebSocket:', error);
         showAlert(`Error: ${error.message || 'Error en comunicación'}`, 'danger');
@@ -1125,6 +1138,17 @@ function verEstadoCarrito() {
 document.addEventListener('DOMContentLoaded', function() {
     console.log('🚀 Inicializando aplicación IoT Carrito...');
     
+    // DETECCIÓN MEJORADA DE ENTORNO
+    const isGitHubPages = window.location.hostname.includes('github.io');
+    console.log(`📍 Entorno detectado: ${isGitHubPages ? 'GitHub Pages' : 'Desarrollo Local'}`);
+    
+    if (isGitHubPages) {
+        console.log('🔒 Modo seguro: Usando HTTPS/WSS');
+        showAlert('🔒 Conectando de forma segura desde GitHub Pages', 'info');
+    } else {
+        console.log('🔓 Modo desarrollo: Usando HTTP/WS');
+    }
+
     // Esconder el resultado del obstáculo inicialmente
     const obstRes = document.getElementById('obstacleResult');
     if (obstRes) obstRes.classList.add('hidden');
@@ -1142,19 +1166,33 @@ document.addEventListener('DOMContentLoaded', function() {
     // Configurar displays iniciales
     clearMonitoringDisplays();
 
-    // Conectar WebSockets (esto iniciará el monitoreo automático)
-    connectWebSocket();
+    // Inicializar ubicación real primero
+    inicializarUbicacionReal().then(() => {
+        console.log('📍 Ubicación inicializada:', ubicacionReal);
+        
+        // Conectar WebSockets (esto iniciará el monitoreo automático)
+        connectWebSocket();
 
-    // Cargar datos iniciales via REST (como fallback/backup)
-    setTimeout(() => {
-        loadMovementLogs();
-        loadObstacleLogs();
-    }, 1000);
+        // Cargar datos iniciales via REST (como fallback/backup)
+        setTimeout(() => {
+            loadMovementLogs();
+            loadObstacleLogs();
+        }, 1000);
 
-    console.log('✅ Aplicación inicializada. WebSockets activos para monitoreo en tiempo real.');
-    console.log('⏱️ Duración fija configurada: 1000ms para Adelante/Atrás');
+        console.log('✅ Aplicación inicializada. WebSockets activos para monitoreo en tiempo real.');
+        console.log('⏱️ Duración fija configurada: 1000ms para Adelante/Atrás');
+    }).catch(error => {
+        console.error('Error inicializando ubicación:', error);
+        // Continuar incluso si falla la ubicación
+        connectWebSocket();
+        
+        // Cargar datos incluso sin ubicación
+        setTimeout(() => {
+            loadMovementLogs();
+            loadObstacleLogs();
+        }, 1000);
+    });
 });
-
 // --- 5. Manejo de Eventos WebSocket para Monitoreo ---
 
 function handleMovementEvent(eventData) {
@@ -1431,48 +1469,6 @@ function repeatDemo(secuencia_id) {
         }
     });
 }
-
-document.addEventListener('DOMContentLoaded', function() {
-    console.log('🚀 Inicializando aplicación IoT Carrito...');
-    
-    // Esconder el resultado del obstáculo inicialmente
-    const obstRes = document.getElementById('obstacleResult');
-    if (obstRes) obstRes.classList.add('hidden');
-
-    // Inicializar caches y estado
-    movementCache = [];
-    obstacleCache = [];
-    carritoEstado = {
-        moviendose: false,
-        movimientoActual: null,
-        timeoutMovimiento: null,
-        duracionMovimiento: 2000 // 1 segundo
-    };
-
-    // Configurar displays iniciales
-    clearMonitoringDisplays();
-
-    // Inicializar ubicación real primero
-    inicializarUbicacionReal().then(() => {
-        console.log('📍 Ubicación inicializada:', ubicacionReal);
-        
-        // Conectar WebSockets (esto iniciará el monitoreo automático)
-        connectWebSocket();
-
-        // Cargar datos iniciales via REST (como fallback/backup)
-        setTimeout(() => {
-            loadMovementLogs();
-            loadObstacleLogs();
-        }, 1000);
-
-        console.log('✅ Aplicación inicializada. WebSockets activos para monitoreo en tiempo real.');
-        console.log('⏱️ Duración fija configurada: 1000ms para Adelante/Atrás');
-    }).catch(error => {
-        console.error('Error inicializando ubicación:', error);
-        // Continuar incluso si falla la ubicación
-        connectWebSocket();
-    });
-});
 
 // Función para actualizar la ubicación periódicamente (opcional)
 function iniciarActualizacionUbicacion() {
