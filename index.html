@@ -10,8 +10,7 @@
     <link rel="stylesheet" href="css/styles.css">
     <!-- Carga de Iconos (Bootstrap Icons) -->
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
-    <!-- Carga de Socket.IO para WebSockets -->
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.7.2/socket.io.js"></script>
+    <!-- ELIMINADO: Socket.IO -->
 </head>
 <body class="bg-dark text-light">
 
@@ -55,7 +54,29 @@
                             <div class="card-body">
                                 <h5 class="card-title text-primary border-bottom border-secondary pb-2 mb-3">Control Manual (Operaciones)</h5>
                                 <div id="controlGrid" class="row g-2 text-center">
-                                    
+                                    <!-- En la sección de Control Manual, después del título -->
+<div class="col-12 mb-3">
+    <div class="card bg-darker-custom">
+        <div class="card-body py-2">
+            <h6 class="text-info mb-2">
+                <i class="bi bi-speedometer2 me-2"></i>Control de Velocidad Global
+            </h6>
+            <div class="d-flex align-items-center">
+                <span class="text-light me-3">Velocidad:</span>
+                <select id="speedSelector" class="form-select bg-dark text-light border-secondary w-auto">
+                    <option value="150">Lenta (150)</option>
+                    <option value="180" selected>Normal (180)</option>
+                    <option value="220">Rápida (220)</option>
+                    <option value="250">Máxima (250)</option>
+                </select>
+                <span id="currentSpeed" class="badge bg-primary ms-2"></span>
+            </div>
+            <small class="text-secondary mt-1 d-block">
+                <i class="bi bi-info-circle me-1"></i>Se aplica solo a movimientos Adelante y Atrás
+            </small>
+        </div>
+    </div>
+</div>
                                     <!-- Fila 1: Adelante y Vueltas en Movimiento -->
                                     <div class="col-3"></div>
                                     <div class="col-6"><button class="btn btn-primary btn-control w-100" data-op="Adelante" onclick="sendMovement(1)"><i class="bi bi-arrow-up"></i> Adelante</button></div>
@@ -124,19 +145,22 @@
                             <div class="card-body">
                                 <h5 class="card-title text-primary border-bottom border-secondary pb-2 mb-3">Secuencias DEMO</h5>
 
-                                <h6 class="text-info fw-bold mt-3">Crear Secuencia Aleatoria</h6>
-                                <div class="p-3 bg-secondary-custom rounded-lg mb-4">
-                                    <input type="number" id="nPasos" placeholder="N° Pasos (Ej: 8)" value="8" min="1" class="form-control bg-dark text-light border-0 mb-2">
-                                    <div class="d-flex gap-2 mb-2">
-                                        <input type="number" id="minMs" placeholder="Min Ms (Ej: 500)" value="500" min="100" class="form-control bg-dark text-light border-0">
-                                        <input type="number" id="maxMs" placeholder="Max Ms (Ej: 1200)" value="1200" min="100" class="form-control bg-dark text-light border-0">
-                                    </div>
-                                    <div class="form-check mb-2">
-                                        <input class="form-check-input bg-dark border-secondary" type="checkbox" value="" id="excluirDetener" checked>
-                                        <label class="form-check-label text-secondary" for="excluirDetener">Excluir "Detener" (Clave 3)</label>
-                                    </div>
-                                    <button class="btn btn-success btn-sm w-100" onclick="createRandomDemo()"><i class="bi bi-shuffle me-2"></i>Crear Demo Aleatorio</button>
-                                </div>
+                                <!-- En la sección "Crear Secuencia Aleatoria" -->
+<h6 class="text-info fw-bold mt-3">Crear Secuencia Aleatoria</h6>
+<div class="p-3 bg-secondary-custom rounded-lg mb-4">
+    <input type="number" id="nPasos" placeholder="N° Pasos (Ej: 8)" value="8" min="1" class="form-control bg-dark text-light border-0 mb-2">
+    <div class="d-flex gap-2 mb-2">
+        <input type="number" id="minMs" placeholder="Min Ms (Ej: 500)" value="500" min="100" class="form-control bg-dark text-light border-0">
+        <input type="number" id="maxMs" placeholder="Max Ms (Ej: 1200)" value="1200" min="100" class="form-control bg-dark text-light border-0">
+    </div>
+    <div class="form-check mb-2">
+        <input class="form-check-input bg-dark border-secondary" type="checkbox" value="" id="excluirDetener" checked>
+        <label class="form-check-label text-secondary" for="excluirDetener">Excluir "Detener" (Clave 3)</label>
+    </div>
+    <button class="btn btn-success btn-sm w-100" onclick="createRandomDemo()">
+        <i class="bi bi-shuffle me-2"></i>Crear Demo Aleatorio
+    </button>
+</div>
 
                                 <h6 class="text-info fw-bold mt-3">Crear Secuencia Manual</h6>
 <div class="p-3 bg-secondary-custom rounded-lg mb-4">
@@ -175,7 +199,6 @@
         </button>
     </div>
 </div>
-
 
                                 <h6 class="text-info fw-bold mt-3">Ejecutar Secuencias Existentes</h6>
                                 <button class="btn btn-secondary btn-sm w-100 mb-3" onclick="loadLast20Demos()">
@@ -235,9 +258,10 @@
                         <div class="card bg-darker-custom shadow-lg">
                             <div class="card-body">
                                 <h5 class="card-title text-primary border-bottom border-secondary pb-2 mb-3">
-                                    WebSockets (Notificaciones de Demo)
+                                    WebSockets Nativo (Notificaciones en Tiempo Real)
                                 </h5>
-                                <p class="text-light small">Estado: <span id="wsStatus" class="fw-bold text-danger">Desconectado</span></p>
+                                <p class="text-light small">Movimientos: <span id="wsMovementStatus" class="fw-bold text-danger">Desconectado</span></p>
+                                <p class="text-light small">Obstáculos: <span id="wsObstacleStatus" class="fw-bold text-danger">Desconectado</span></p>
                                 <div id="wsLog" class="log-box-custom text-info" style="max-height: 150px;">
                                     <p class="text-secondary small">Esperando conexión...</p>
                                 </div>
@@ -245,55 +269,85 @@
                         </div>
                     </div>
 
-                    <!-- En la pestaña de Monitoreo, después de la sección de WebSockets -->
+                   <!-- Ejecución de Secuencias en Tiempo Real -->
 <div class="col-12 mt-4">
     <div class="card bg-darker-custom shadow-lg">
         <div class="card-body">
             <h5 class="card-title text-primary border-bottom border-secondary pb-2 mb-3 d-flex justify-content-between align-items-center">
                 <span>Ejecución de Secuencias en Tiempo Real</span>
-                <button class="btn btn-sm btn-danger" onclick="limpiarEjecucionSecuencia()">
-                    <i class="bi bi-x-circle me-1"></i>Limpiar
-                </button>
+                <div>
+                    <button class="btn btn-sm btn-success me-1" onclick="reanudarSecuencia()" id="btnReanudarSecuencia" disabled>
+                        <i class="bi bi-play-circle me-1"></i>Reanudar
+                    </button>
+                    <button class="btn btn-sm btn-warning me-1" onclick="pausarSecuencia()" id="btnPausarSecuencia" disabled>
+                        <i class="bi bi-pause-circle me-1"></i>Pausar
+                    </button>
+                    <button class="btn btn-sm btn-danger" onclick="detenerSecuencia()" id="btnDetenerSecuencia" disabled>
+                        <i class="bi bi-stop-circle me-1"></i>Detener
+                    </button>
+                </div>
             </h5>
             
-            <!-- Información de la secuencia actual -->
-            <div id="secuenciaInfo" class="mb-3 p-3 bg-secondary rounded hidden">
-                <div class="row">
-                    <div class="col-md-6">
-                        <strong class="text-warning">Secuencia ID:</strong> 
-                        <span id="secuenciaIdActual">-</span>
+            <!-- Estado actual de la secuencia -->
+            <div id="estadoSecuencia" class="mb-3 p-3 bg-secondary rounded">
+                <div class="row text-center">
+                    <div class="col-md-3">
+                        
                     </div>
-                    <div class="col-md-6">
-                        <strong class="text-warning">Total Pasos:</strong> 
-                        <span id="totalPasosSecuencia">-</span>
+                    <div class="col-md-3">
+                        <strong class="text-warning d-block">Paso Actual</strong>
+                        <span id="pasoActualSecuencia" class="text-light">-/-</span>
                     </div>
-                    <div class="col-md-6">
-                        <strong class="text-warning">Paso Actual:</strong> 
-                        <span id="pasoActualSecuencia">-</span>
+                    <div class="col-md-3">
+                        <strong class="text-warning d-block">Progreso</strong>
+                        <span id="progresoTexto" class="text-light">0%</span>
                     </div>
-                    <div class="col-md-6">
-                        <strong class="text-warning">Tiempo Restante:</strong> 
-                        <span id="tiempoRestanteSecuencia">-</span>
+                    <div class="col-md-3">
+                        <strong class="text-warning d-block">Tiempo Restante</strong>
+                        <span id="tiempoRestanteSecuencia" class="text-light">-</span>
                     </div>
                 </div>
             </div>
 
-            <!-- Barra de progreso -->
-            <div class="mb-3">
-                <div class="d-flex justify-content-between text-light small mb-1">
+            <!-- Barra de progreso mejorada -->
+            <div class="mb-4">
+                <div class="d-flex justify-content-between text-light small mb-2">
                     <span>Progreso de la secuencia</span>
-                    <span id="progresoTexto">0%</span>
+                    <span id="progresoDetalle">Preparando...</span>
                 </div>
-                <div class="progress" style="height: 8px;">
-                    <div id="barraProgresoSecuencia" class="progress-bar progress-bar-striped progress-bar-animated" 
-                         role="progressbar" style="width: 0%"></div>
+                <div class="progress" style="height: 12px; border-radius: 6px;">
+                    <div id="barraProgresoSecuencia" 
+                         class="progress-bar progress-bar-striped progress-bar-animated" 
+                         role="progressbar" 
+                         style="width: 0%; background-color: #0d6efd;">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Información del paso actual -->
+            <div id="infoPasoActual" class="mb-3 p-3 bg-dark rounded hidden">
+                <h6 class="text-info mb-2">Paso en Ejecución</h6>
+                <div class="row">
+                    <div class="col-md-6">
+                        <strong class="text-light">Operación:</strong> 
+                        <span id="operacionActual" class="text-warning">-</span>
+                    </div>
+                    <div class="col-md-6">
+                        <strong class="text-light">Duración:</strong> 
+                        <span id="duracionActual" class="text-warning">-</span>
+                    </div>
                 </div>
             </div>
 
             <!-- Log de ejecución en tiempo real -->
-            <h6 class="text-light fw-bold mb-2">Log de Ejecución</h6>
-            <div id="logEjecucionSecuencia" class="log-box-custom text-info" style="max-height: 250px; min-height: 150px;">
-                <p class="text-secondary small text-center mt-3">No hay secuencia en ejecución</p>
+            <h6 class="text-light fw-bold mb-2">
+                <i class="bi bi-activity me-2"></i>Log de Ejecución en Tiempo Real
+            </h6>
+            <div id="logEjecucionSecuencia" class="log-box-custom bg-dark border border-secondary rounded p-3" 
+                 style="max-height: 300px; min-height: 200px; overflow-y: auto;">
+                <p class="text-secondary small text-center my-4">
+                    <i class="bi bi-info-circle me-2"></i>No hay secuencia en ejecución
+                </p>
             </div>
         </div>
     </div>

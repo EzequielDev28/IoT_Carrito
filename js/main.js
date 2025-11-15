@@ -1,17 +1,7 @@
 // --- 1. Configuración Global EXCLUSIVA AWS ---
-// CONFIGURACIÓN PARA AWS - COMENTA PARA USO LOCAL
-const isGitHubPages = true; // Forzado para AWS
+const isGitHubPages = true;
 const API_BASE_URL = 'https://100.26.151.211:443/api';
-const WS_BASE_URL = 'https://100.26.151.211:443';
-
-// ════════════════════════════════════════════════════
-// CONFIGURACIÓN LOCAL (COMENTADA) - DESCOMENTAR PARA DESARROLLO LOCAL
-/*
-const isGitHubPages = false;
-const API_BASE_URL = 'http://127.0.0.1:5500/api';
-const WS_BASE_URL = 'http://127.0.0.1:5500';
-*/
-// ════════════════════════════════════════════════════
+const WS_BASE_URL = 'wss://100.26.151.211:443';
 
 console.log(`🌐 Entorno: AWS EC2 Instance`);
 console.log(`🔗 API: ${API_BASE_URL}`);
@@ -19,12 +9,19 @@ console.log(`🔗 WebSocket: ${WS_BASE_URL}`);
 
 let DEVICE_NAME = document.getElementById('deviceInput').value || 'carrito-alpha';
 
+// WebSockets nativos
+let wsMovement = null;
+let wsObstacle = null;
+let movementReconnectAttempts = 0;
+let obstacleReconnectAttempts = 0;
+const MAX_RECONNECT_ATTEMPTS = 10;
+const RECONNECT_DELAY = 3000;
+
 // Control de estado del carrito
 let carritoEstado = {
     moviendose: false,
     movimientoActual: null,
-    timeoutMovimiento: null,
-    duracionMovimiento: 2000 // 1 segundo para Adelante y Atrás
+    timeoutMovimiento: null
 };
 
 // Control de ejecución de secuencias
@@ -36,12 +33,12 @@ let ejecucionSecuencia = {
     totalPasos: 0,
     timeoutPasos: [],
     inicioEjecucion: null,
-    pausada: false,                    // NUEVO: Para pausar por obstáculo
-    pasoInterrumpido: null,            // NUEVO: Guardar paso interrumpido
-    tiempoRestantePaso: 0              // NUEVO: Tiempo restante del paso interrumpido
+    pausada: false,
+    pasoInterrumpido: null,
+    tiempoRestantePaso: 0
 };
 
-// --- Datos de Ubicación y Hora en Tiempo Real ---
+// Datos de Ubicación y Hora en Tiempo Real
 let ubicacionReal = {
     ip: 'Desconocida',
     pais: 'Desconocido',
@@ -50,55 +47,6 @@ let ubicacionReal = {
     lon: null,
     timestamp: null
 };
-
-// Función para obtener la IP pública
-async function obtenerIP() {
-    try {
-        const response = await fetch('https://api.ipify.org?format=json');
-        const data = await response.json();
-        return data.ip;
-    } catch (error) {
-        console.warn('No se pudo obtener la IP:', error);
-        return 'Desconocida';
-    }
-}
-
-function verificarHora() {
-    const ahora = new Date();
-    console.log('🕐 Hora actual:');
-    console.log(' - Local:', ahora.toString());
-    console.log(' - ISO:', ahora.toISOString());
-    console.log(' - Nuestra función:', obtenerTimestampActual());
-}
-
-// Llamar para verificar
-verificarHora();
-
-// Función para obtener timestamp actual en hora local (formato legible)
-function obtenerTimestampActual() {
-    const now = new Date();
-    return now.toLocaleString('es-MX', {
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit',
-        second: '2-digit',
-        hour12: false
-    });
-}
-
-// Función para obtener datos completos para enviar al servidor
-function obtenerDatosUbicacion() {
-    return {
-        ip: ubicacionReal.ip,
-        pais: ubicacionReal.pais,
-        ciudad: ubicacionReal.ciudad,
-        latitud: ubicacionReal.lat,
-        longitud: ubicacionReal.lon,
-        timestamp: obtenerTimestampActual()
-    };
-}
 
 // Mapeo de operaciones y obstáculos a claves
 const OPERACION_MAP = {
@@ -123,627 +71,157 @@ const OBSTACULO_MAP = {
     'Retrocede': 5
 };
 
-// --- 2. Inicialización de WebSockets MEJORADA ---
-let socket;
-let isMonitoringActive = false;
+// --- 2. WebSockets Nativos ---
 
-// Caches locales
-let movementCache = [];
-let obstacleCache = [];
+function connectWebSockets() {
+    connectMovementWebSocket();
+    connectObstacleWebSocket();
+}
 
-function connectWebSocket() {
-    console.log('🔄 Iniciando conexión WebSocket...');
+function connectMovementWebSocket() {
+    const url = `${WS_BASE_URL}/ws/movement/${DEVICE_NAME}`;
     
-    // Limpiar conexión anterior si existe
-    if (socket) {
-        console.log('🧹 Limpiando socket anterior...');
-        socket.disconnect();
-        socket = null;
-    }
-
-    // CONFIGURACIÓN MEJORADA para AWS
-    const socketOptions = {
-        transports: ['websocket', 'polling'],
-        timeout: 15000,
-        reconnection: true,
-        reconnectionAttempts: 10,
-        reconnectionDelay: 3000,
-        secure: true,
-        rejectUnauthorized: false,
-        forceNew: true  // IMPORTANTE: Forzar nueva conexión
-    };
-
-    console.log(`🔗 Conectando a: ${WS_BASE_URL}`);
-    console.log('⚙️ Opciones:', socketOptions);
-
     try {
-        socket = io(WS_BASE_URL, socketOptions);
-        console.log('✅ Socket.io instanciado correctamente');
-    } catch (error) {
-        console.error('❌ Error creando socket:', error);
-        showAlert('Error inicializando WebSocket', 'danger');
-        return;
-    }
-
-    const wsStatus = document.getElementById('wsStatus');
-
-    // --- EVENT LISTENERS MEJORADOS ---
-    
-    socket.on('connect', () => {
-        console.log('✅✅✅ WebSocket CONECTADO exitosamente! ID:', socket.id);
-        wsStatus.textContent = 'Conectado';
-        wsStatus.className = 'fw-bold text-success';
+        wsMovement = new WebSocket(url);
         
-        logToWS(`✅ Conectado al dispositivo: ${DEVICE_NAME}`);
-        showAlert('WebSocket conectado - Monitoreo activo', 'success');
-        
-        // Suscribirse después de un pequeño delay
-        setTimeout(() => {
-            subscribeToMonitoring();
-            requestImmediateData();
-        }, 1000);
-    });
-
-    socket.on('disconnect', (reason) => {
-        console.log('❌ WebSocket desconectado. Razón:', reason);
-        wsStatus.textContent = 'Desconectado';
-        wsStatus.className = 'fw-bold text-danger';
-        logToWS(`❌ Desconectado: ${reason}`);
-        isMonitoringActive = false;
-        
-        // Reconexión automática para ciertos tipos de desconexión
-        if (reason === 'io server disconnect' || reason === 'transport close') {
-            console.log('🔄 Intentando reconexión automática...');
-            setTimeout(() => connectWebSocket(), 2000);
-        }
-    });
-
-    socket.on('connect_error', (error) => {
-        console.error('❌ ERROR de conexión WebSocket:', error);
-        console.error('🔍 Detalles del error:', {
-            message: error.message,
-            type: error.type,
-            description: error.description
-        });
-        
-        wsStatus.textContent = 'Error de conexión';
-        wsStatus.className = 'fw-bold text-warning';
-        logToWS(`❌ Error: ${error.message}`);
-        
-        // Diagnóstico específico de errores comunes
-        if (error.message.includes('SSL')) {
-            showAlert('Error SSL/TLS - Verificando certificados...', 'warning');
-        } else if (error.message.includes('timeout')) {
-            showAlert('Timeout de conexión - Reintentando...', 'warning');
-        } else if (error.message.includes('xhr poll error')) {
-            showAlert('Error de transporte HTTP - Cambiando a WebSocket...', 'warning');
-        } else {
-            showAlert(`Error conexión: ${error.message}`, 'danger');
-        }
-        
-        // Reconexión después de 5 segundos
-        setTimeout(() => {
-            console.log('🔄 Reintentando conexión WebSocket...');
-            connectWebSocket();
-        }, 5000);
-    });
-
-    socket.on('reconnect_attempt', (attempt) => {
-        console.log(`🔄 Intento de reconexión #${attempt}`);
-        logToWS(`🔄 Reconectando... intento ${attempt}`);
-    });
-
-    socket.on('reconnect', (attempt) => {
-        console.log(`✅ Reconectado después de ${attempt} intentos`);
-        logToWS('✅ Reconexión exitosa');
-        showAlert('WebSocket reconectado', 'success');
-    });
-
-    socket.on('reconnect_error', (error) => {
-        console.error('❌ Error en reconexión:', error);
-        logToWS('❌ Error en reconexión');
-    });
-
-    // --- EVENTOS DE DATOS ---
-    socket.on('connection_status', (data) => {
-        console.log('📊 Estado de conexión recibido:', data);
-        if (data.ssl_enabled) {
-            logToWS('✅ Conexión segura SSL establecida');
-        }
-    });
-
-    socket.on('movement_update', (data) => {
-        console.log('📡 Movimiento actualizado via WS:', data);
-        if (data && data.data) {
-            handleMovementEvent(data.data);
-        } else if (data) {
-            handleMovementEvent(data);
-        }
-    });
-
-    socket.on('obstacle_update', (data) => {
-        console.log('📡 Obstáculo actualizado via WS:', data);
-        if (data && data.data) {
-            handleObstacleEvent(data.data);
-        } else if (data) {
-            handleObstacleEvent(data);
-        }
-    });
-
-    socket.on('immediate_movement_response', (data) => {
-        console.log('🎯 Movimiento inmediato recibido:', data);
-        if (data && data.data) {
-            handleMovementEvent(data.data);
-        }
-    });
-
-    socket.on('immediate_obstacle_response', (data) => {
-        console.log('🎯 Obstáculo inmediato recibido:', data);
-        if (data && data.data) {
-            handleObstacleEvent(data.data);
-        }
-    });
-
-    socket.on('subscription_confirmed', (data) => {
-        console.log('✅ Suscripción confirmada:', data);
-        logToWS(`✅ Suscripción activa: ${data.type} para ${data.device_name}`);
-        isMonitoringActive = true;
-    });
-
-    socket.on('demo_scheduled', (data) => {
-        console.log('🎭 Demo programada recibida:', data);
-        handleDemoScheduled(data);
-    });
-
-    socket.on('demo_scheduled_' + DEVICE_NAME, (data) => {
-        console.log('🎭 Demo programada específica recibida:', data);
-        handleDemoScheduled(data);
-    });
-
-    socket.on('error', (error) => {
-        console.error('❌ Error via WebSocket:', error);
-        showAlert(`Error WS: ${error.message || 'Error en comunicación'}`, 'danger');
-        logToWS(`❌ Error: ${error.message || 'Error desconocido'}`);
-    });
-
-    socket.on('pong', (data) => {
-        console.log('🏓 Pong recibido:', data);
-        logToWS('✅ Latencia WebSocket verificada');
-    });
-
-    // Test de conexión después de conectar
-    socket.on('connect', () => {
-        setTimeout(() => {
-            if (socket.connected) {
-                console.log('🏓 Enviando ping de prueba...');
-                socket.emit('ping');
-            }
-        }, 2000);
-    });
-}
-
-// AGREGAR esta nueva función para manejar demos programadas
-function handleDemoScheduled(data) {
-    console.log('🎭 Procesando demo programada:', data);
-    
-    if (data && data.movimientos_programados && data.movimientos_programados.length > 0) {
-        const secuenciaId = data.ejecucion?.secuencia_id || data.ejecucion?.id;
-        if (secuenciaId) {
-            console.log(`🚀 Iniciando monitoreo de secuencia ID: ${secuenciaId}`);
-            setTimeout(() => {
-                iniciarMonitoreoSecuencia(secuenciaId, data.movimientos_programados);
-            }, 1000);
-        }
-    } else {
-        console.warn('⚠️ Demo programada sin movimientos válidos:', data);
-    }
-}
-
-function iniciarMonitoreoSecuencia(secuenciaId, movimientosProgramados) {
-    if (!movimientosProgramados || movimientosProgramados.length === 0) {
-        console.log('❌ No hay movimientos programados para monitorear');
-        return;
-    }
-
-    // Limpiar ejecución anterior si existe
-    detenerEjecucionSecuencia();
-
-    // Calcular duraciones basadas en scheduled_at
-    const pasosConDuracion = calcularDuraciones(movimientosProgramados);
-    
-    console.log('📋 Pasos con duración calculada:', pasosConDuracion);
-
-    ejecucionSecuencia = {
-        activa: true,
-        secuenciaId: secuenciaId,
-        pasos: pasosConDuracion,
-        pasoActual: 0,
-        totalPasos: pasosConDuracion.length,
-        timeoutPasos: [],
-        inicioEjecucion: new Date()
-    };
-
-    // Mostrar información de la secuencia
-    mostrarInformacionSecuencia();
-    
-    // Iniciar el primer paso
-    ejecutarSiguientePaso();
-    
-    console.log(`🎬 Iniciando monitoreo de secuencia ID: ${secuenciaId} con ${pasosConDuracion.length} pasos`);
-    agregarLogEjecucion(`🎬 SECUENCIA INICIADA - ID: ${secuenciaId} | Pasos: ${pasosConDuracion.length}`);
-}
-
-// --- AGREGAR función para calcular duraciones ---
-function calcularDuraciones(movimientos) {
-    if (!movimientos || movimientos.length === 0) return [];
-    
-    const pasos = [];
-    
-    for (let i = 0; i < movimientos.length; i++) {
-        const movimiento = movimientos[i];
-        const scheduledAt = new Date(movimiento.scheduled_at);
-        
-        // Calcular duración basada en la diferencia con el siguiente movimiento
-        let duracion_ms = 1000; // Duración por defecto
-        
-        if (i < movimientos.length - 1) {
-            const nextScheduledAt = new Date(movimientos[i + 1].scheduled_at);
-            duracion_ms = nextScheduledAt - scheduledAt;
+        wsMovement.onopen = function(event) {
+            console.log('✅ WebSocket de Movimientos CONECTADO');
+            movementReconnectAttempts = 0;
+            updateWSStatus('movement', 'connected');
+            logToWS('MOV', 'Conectado al servidor de movimientos');
+            showAlert('WebSocket de movimientos conectado', 'success');
             
-            // Asegurar duración mínima de 100ms
-            if (duracion_ms < 100) {
-                duracion_ms = 1000; // Fallback a 1 segundo
+            // Cargar datos iniciales cuando se conecta
+            loadMovementLogs();
+        };
+        
+        wsMovement.onclose = function(event) {
+            console.log('❌ WebSocket de Movimientos CERRADO:', event.code, event.reason);
+            updateWSStatus('movement', 'disconnected');
+            logToWS('MOV', `Conexión cerrada: ${event.code} - ${event.reason}`);
+            
+            if (movementReconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+                movementReconnectAttempts++;
+                console.log(`🔄 Reintentando conexión de movimientos (${movementReconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`);
+                setTimeout(connectMovementWebSocket, RECONNECT_DELAY);
             }
-        } else {
-            // Último movimiento - usar duración por defecto
-            duracion_ms = 1000;
-        }
+        };
         
-        pasos.push({
-            operacion: movimiento.operacion_clave,
-            duracion_ms: duracion_ms,
-            scheduled_at: movimiento.scheduled_at,
-            operacion_texto: movimiento.operacion_texto,
-            movimiento_original: movimiento
-        });
-    }
-    
-    return pasos;
-}
-
-// --- AGREGAR función de debug para secuencias ---
-function debugSecuencia(data) {
-    console.log('🐛 DEBUG - Estructura completa de la secuencia:', data);
-    
-    if (data.movimientos_programados) {
-        console.log('📋 Movimientos programados:', data.movimientos_programados);
-        data.movimientos_programados.forEach((paso, index) => {
-            console.log(`   Paso ${index + 1}:`, paso);
-            console.log(`   - Keys:`, Object.keys(paso));
-            console.log(`   - Valores:`, Object.values(paso));
-        });
-    }
-    
-    return data;
-}
-
-function ejecutarSiguientePaso() {
-    // Verificar si la secuencia está pausada por obstáculo
-    if (ejecucionSecuencia.pausada) {
-        console.log('⏸️ Secuencia pausada, esperando reanudación...');
-        return;
-    }
-    
-    if (!ejecucionSecuencia.activa || ejecucionSecuencia.pasoActual >= ejecucionSecuencia.totalPasos) {
-        finalizarEjecucionSecuencia();
-        return;
-    }
-
-    const paso = ejecucionSecuencia.pasos[ejecucionSecuencia.pasoActual];
-    const numeroPaso = ejecucionSecuencia.pasoActual + 1;
-    
-    // Validar datos del paso
-    if (!paso.operacion || !paso.duracion_ms) {
-        console.error('❌ Paso inválido:', paso);
-        agregarLogEjecucion(`❌ ERROR: Paso ${numeroPaso} tiene datos inválidos. Saltando...`);
-        ejecucionSecuencia.pasoActual++;
-        ejecutarSiguientePaso();
-        return;
-    }
-    
-    // Mostrar el paso actual
-    mostrarPasoActual(numeroPaso, paso);
-    
-    // Calcular tiempo restante total
-    const tiempoRestante = calcularTiempoRestanteTotal();
-    
-    // Actualizar progreso
-    actualizarProgreso(numeroPaso, tiempoRestante);
-    
-    // Log del paso ejecutado
-    const operacionTexto = paso.operacion_texto || Object.keys(OPERACION_MAP).find(key => OPERACION_MAP[key] === paso.operacion) || `Operación ${paso.operacion}`;
-    agregarLogEjecucion(`▶️ Paso ${numeroPaso}/${ejecucionSecuencia.totalPasos}: ${operacionTexto} (${Math.round(paso.duracion_ms)}ms)`);
-    
-    console.log(`⏱️ Programando paso ${numeroPaso} por ${paso.duracion_ms}ms - ${operacionTexto}`);
-    
-    // Programar el siguiente paso
-    const timeout = setTimeout(() => {
-        // Verificar nuevamente si no está pausada antes de continuar
-        if (!ejecucionSecuencia.pausada) {
-            console.log(`✅ Paso ${numeroPaso} completado`);
-            ejecucionSecuencia.pasoActual++;
-            ejecutarSiguientePaso();
-        }
-    }, paso.duracion_ms);
-
-    ejecucionSecuencia.timeoutPasos.push(timeout);
-}
-
-function mostrarInformacionSecuencia() {
-    const secuenciaInfo = document.getElementById('secuenciaInfo');
-    const secuenciaIdActual = document.getElementById('secuenciaIdActual');
-    const totalPasosSecuencia = document.getElementById('totalPasosSecuencia');
-    
-    secuenciaInfo.classList.remove('hidden');
-    secuenciaIdActual.textContent = ejecucionSecuencia.secuenciaId;
-    totalPasosSecuencia.textContent = ejecucionSecuencia.totalPasos;
-}
-
-function mostrarPasoActual(numeroPaso, paso) {
-    const pasoActualSecuencia = document.getElementById('pasoActualSecuencia');
-    
-    // Usar operacion_texto si está disponible, sino usar el mapa
-    let operacionTexto = paso.operacion_texto;
-    if (!operacionTexto && paso.operacion && OPERACION_MAP) {
-        operacionTexto = Object.keys(OPERACION_MAP).find(key => OPERACION_MAP[key] === paso.operacion);
-    }
-    
-    if (!operacionTexto) {
-        operacionTexto = `Operación ${paso.operacion || 'N/A'}`;
-    }
-    
-    const duracion = paso.duracion_ms ? Math.round(paso.duracion_ms) : 'N/A';
-    pasoActualSecuencia.textContent = `${numeroPaso} - ${operacionTexto} (${duracion}ms)`;
-}
-
-function actualizarProgreso(pasoActual, tiempoRestante) {
-    const progreso = (pasoActual / ejecucionSecuencia.totalPasos) * 100;
-    const barraProgreso = document.getElementById('barraProgresoSecuencia');
-    const progresoTexto = document.getElementById('progresoTexto');
-    const tiempoRestanteSecuencia = document.getElementById('tiempoRestanteSecuencia');
-    
-    barraProgreso.style.width = `${progreso}%`;
-    progresoTexto.textContent = `${Math.round(progreso)}%`;
-    tiempoRestanteSecuencia.textContent = tiempoRestante;
-    
-    // Cambiar color de la barra según el progreso
-    if (progreso < 50) {
-        barraProgreso.className = 'progress-bar progress-bar-striped progress-bar-animated bg-warning';
-    } else if (progreso < 100) {
-        barraProgreso.className = 'progress-bar progress-bar-striped progress-bar-animated bg-info';
-    } else {
-        barraProgreso.className = 'progress-bar progress-bar-striped progress-bar-animated bg-success';
-    }
-}
-
-// --- AGREGAR función para debug de tiempos ---
-function debugTiemposSecuencia(movimientos) {
-    console.log('⏰ DEBUG - Tiempos de la secuencia:');
-    
-    movimientos.forEach((mov, index) => {
-        const scheduled = new Date(mov.scheduled_at);
-        console.log(`   Paso ${index + 1}: ${mov.operacion_texto}`);
-        console.log(`   - Scheduled: ${scheduled.toLocaleTimeString()}.${scheduled.getMilliseconds()}`);
+        wsMovement.onerror = function(error) {
+            console.error('❌ Error en WebSocket de Movimientos:', error);
+            updateWSStatus('movement', 'error');
+            logToWS('MOV', 'Error de conexión');
+        };
         
-        if (index < movimientos.length - 1) {
-            const nextScheduled = new Date(movimientos[index + 1].scheduled_at);
-            const diferencia = nextScheduled - scheduled;
-            console.log(`   - Duración calculada: ${diferencia}ms`);
-        } else {
-            console.log(`   - Último paso (duración por defecto: 1000ms)`);
-        }
-    });
-}
-
-function calcularTiempoRestanteTotal() {
-    if (!ejecucionSecuencia.activa) return '0s';
-    
-    let tiempoTotalRestante = 0;
-    for (let i = ejecucionSecuencia.pasoActual; i < ejecucionSecuencia.totalPasos; i++) {
-        tiempoTotalRestante += ejecucionSecuencia.pasos[i].duracion_ms;
-    }
-    
-    // Si el tiempo es muy pequeño, mostrar 0s
-    if (tiempoTotalRestante < 100) {
-        return '0s';
-    }
-    
-    const segundos = Math.floor(tiempoTotalRestante / 1000);
-    if (segundos < 60) {
-        return `${segundos}s`;
-    } else {
-        const minutos = Math.floor(segundos / 60);
-        const segundosRestantes = segundos % 60;
-        return `${minutos}m ${segundosRestantes}s`;
-    }
-}
-
-function agregarLogEjecucion(mensaje) {
-    const logEjecucion = document.getElementById('logEjecucionSecuencia');
-    const ahora = new Date();
-    const timestamp = ahora.toLocaleTimeString() + '.' + ahora.getMilliseconds().toString().padStart(3, '0');
-    
-    const logEntry = document.createElement('div');
-    logEntry.className = 'border-bottom border-secondary py-1 small';
-    logEntry.innerHTML = `<span class="text-light">[${timestamp}]</span> ${mensaje}`;
-    
-    logEjecucion.prepend(logEntry);
-    
-    // Mantener máximo 15 entradas en el log
-    const entries = logEjecucion.querySelectorAll('div');
-    if (entries.length > 15) {
-        entries[entries.length - 1].remove();
-    }
-}
-
-function finalizarEjecucionSecuencia() {
-    if (ejecucionSecuencia.activa) {
-        agregarLogEjecucion('✅ SECUENCIA COMPLETADA EXITOSAMENTE');
-        showAlert(`Secuencia ${ejecucionSecuencia.secuenciaId} completada`, 'success');
-    }
-    
-    ejecucionSecuencia.activa = false;
-    
-    // Actualizar UI final
-    actualizarProgreso(ejecucionSecuencia.totalPasos, '0s');
-    document.getElementById('pasoActualSecuencia').textContent = 'COMPLETADO';
-    
-    // Cambiar barra a éxito completo
-    const barraProgreso = document.getElementById('barraProgresoSecuencia');
-    barraProgreso.className = 'progress-bar bg-success';
-    
-    console.log('🏁 Ejecución de secuencia finalizada');
-}
-
-function detenerEjecucionSecuencia() {
-    if (ejecucionSecuencia.activa) {
-        // Limpiar todos los timeouts
-        ejecucionSecuencia.timeoutPasos.forEach(timeout => clearTimeout(timeout));
+        wsMovement.onmessage = function(event) {
+    try {
+        const data = JSON.parse(event.data);
+        console.log('📡 Mensaje recibido de movimiento:', data);
+        logToWS('MOV', `Datos: ${data.operacion_texto || 'Actualización'}`);
         
-        // Solo loggear si no fue por obstáculo
-        if (!ejecucionSecuencia.pausada) {
-            agregarLogEjecucion('⏹️ SECUENCIA DETENIDA MANUALMENTE');
-        }
+        // Esta línea debe llamar handleMovementEvent que ahora actualiza la UI
+        handleMovementEvent(data);
+        
+    } catch (error) {
+        console.error('❌ Error parseando mensaje de movimiento:', error);
+        logToWS('MOV', 'Error parseando mensaje');
     }
-    
-    ejecucionSecuencia = {
-        activa: false,
-        secuenciaId: null,
-        pasos: [],
-        pasoActual: 0,
-        totalPasos: 0,
-        timeoutPasos: [],
-        inicioEjecucion: null,
-        pausada: false,
-        pasoInterrumpido: null,
-        tiempoRestantePaso: 0
-    };
-}
-
-function limpiarEjecucionSecuencia() {
-    detenerEjecucionSecuencia();
-    
-    // Resetear UI
-    document.getElementById('secuenciaInfo').classList.add('hidden');
-    document.getElementById('barraProgresoSecuencia').style.width = '0%';
-    document.getElementById('barraProgresoSecuencia').className = 'progress-bar progress-bar-striped progress-bar-animated';
-    document.getElementById('progresoTexto').textContent = '0%';
-    document.getElementById('logEjecucionSecuencia').innerHTML = 
-        '<p class="text-secondary small text-center mt-3">No hay secuencia en ejecución</p>';
-    
-    console.log('🧹 Monitor de secuencia limpiado');
-}
-
-// --- AGREGAR función para cancelar evasión (opcional) ---
-function cancelarEvasionYContinuar() {
-    if (ejecucionSecuencia.activa && ejecucionSecuencia.pausada) {
-        console.log('⏩ Cancelando evasión y continuando secuencia');
-        agregarLogEjecucion('⏩ Evasión cancelada - Continuando secuencia');
+};
         
-        // Reanudar sin procesar evasión
-        ejecucionSecuencia.pausada = false;
-        ejecucionSecuencia.pasoInterrumpido = null;
-        ejecucionSecuencia.tiempoRestantePaso = 0;
-        
-        ejecutarSiguientePaso();
-        showAlert('Evasión cancelada, continuando secuencia', 'info');
+    } catch (error) {
+        console.error('❌ Error creando WebSocket de movimientos:', error);
+        updateWSStatus('movement', 'error');
     }
 }
 
-function subscribeToMonitoring() {
-    if (socket && socket.connected) {
-        console.log('📡 Enviando suscripciones para:', DEVICE_NAME);
+function connectObstacleWebSocket() {
+    const url = `${WS_BASE_URL}/ws/obstacle/${DEVICE_NAME}`;
+    
+    try {
+        wsObstacle = new WebSocket(url);
         
-        // Suscribirse a monitoreo automático
-        socket.emit('subscribe_movements', { device_name: DEVICE_NAME });
-        socket.emit('subscribe_obstacles', { device_name: DEVICE_NAME });
+        wsObstacle.onopen = function(event) {
+            console.log('✅ WebSocket de Obstáculos CONECTADO');
+            obstacleReconnectAttempts = 0;
+            updateWSStatus('obstacle', 'connected');
+            logToWS('OBS', 'Conectado al servidor de obstáculos');
+            showAlert('WebSocket de obstáculos conectado', 'success');
+            
+            // Cargar datos iniciales cuando se conecta
+            loadObstacleLogs();
+        };
         
-        console.log('✅ Suscripciones enviadas para monitoreo automático');
-        
-        // Verificar que se enviaron
-        setTimeout(() => {
-            if (socket.connected) {
-                console.log('✅ Socket sigue conectado después de suscripciones');
+        wsObstacle.onclose = function(event) {
+            console.log('❌ WebSocket de Obstáculos CERRADO:', event.code, event.reason);
+            updateWSStatus('obstacle', 'disconnected');
+            logToWS('OBS', `Conexión cerrada: ${event.code} - ${event.reason}`);
+            
+            if (obstacleReconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+                obstacleReconnectAttempts++;
+                console.log(`🔄 Reintentando conexión de obstáculos (${obstacleReconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`);
+                setTimeout(connectObstacleWebSocket, RECONNECT_DELAY);
             }
-        }, 1000);
-    } else {
-        console.error('❌ No se pueden enviar suscripciones - Socket no conectado');
-        // Intentar reconectar
-        setTimeout(() => connectWebSocket(), 2000);
+        };
+        
+        wsObstacle.onerror = function(error) {
+            console.error('❌ Error en WebSocket de Obstáculos:', error);
+            updateWSStatus('obstacle', 'error');
+            logToWS('OBS', 'Error de conexión');
+        };
+        
+        wsObstacle.onmessage = function(event) {
+    try {
+        const data = JSON.parse(event.data);
+        console.log('📡 Mensaje recibido de obstáculo:', data);
+        logToWS('OBS', `Datos: ${data.obstaculo_texto || 'Actualización'}`);
+        
+        // Esta línea debe llamar handleObstacleEvent que ahora actualiza la UI
+        handleObstacleEvent(data);
+        
+    } catch (error) {
+        console.error('❌ Error parseando mensaje de obstáculo:', error);
+        logToWS('OBS', 'Error parseando mensaje');
+    }
+};
+        
+    } catch (error) {
+        console.error('❌ Error creando WebSocket de obstáculos:', error);
+        updateWSStatus('obstacle', 'error');
     }
 }
 
-function requestImmediateData() {
-    if (socket && socket.connected) {
-        console.log('🎯 Solicitando datos inmediatos para:', DEVICE_NAME);
-        
-        // Solicitar datos inmediatos al conectar
-        socket.emit('get_immediate_movement', { device_name: DEVICE_NAME });
-        socket.emit('get_immediate_obstacle', { device_name: DEVICE_NAME });
-        
-        console.log('✅ Solicitudes de datos inmediatos enviadas');
-    } else {
-        console.error('❌ No se pueden solicitar datos - Socket no conectado');
-    }
-}
-
-function logToWS(message) {
-    const wsLog = document.getElementById('wsLog');
-    const now = new Date().toLocaleTimeString();
-    const logEntry = `<p class="small mb-1">[${now}] ${message}</p>`;
+function updateWSStatus(type, status) {
+    const element = document.getElementById(`ws${type.charAt(0).toUpperCase() + type.slice(1)}Status`);
+    if (!element) return;
     
-    // Mantener solo los últimos 10 mensajes
-    const currentLogs = wsLog.innerHTML;
-    const logsArray = currentLogs.split('</p>').filter(log => log.trim() !== '');
-    logsArray.unshift(logEntry);
-    
-    if (logsArray.length > 10) {
-        logsArray.length = 10;
-    }
-    
-    wsLog.innerHTML = logsArray.join('</p>') + '</p>';
-}
-
-// Función para cambiar el dispositivo
-function updateDeviceName(newName) {
-    if (newName && newName !== DEVICE_NAME) {
-        const oldName = DEVICE_NAME;
-        DEVICE_NAME = newName;
-        
-        showAlert(`Cambiando dispositivo de ${oldName} a ${DEVICE_NAME}. Reconectando WS...`, 'info');
-        
-        // Limpiar caches
-        movementCache = [];
-        obstacleCache = [];
-        
-        // Actualizar UI
-        clearMonitoringDisplays();
-        
-        // Reconectar WebSocket
-        if (socket) {
-            socket.emit('unsubscribe_movements', { device_name: oldName });
-            socket.emit('unsubscribe_obstacles', { device_name: oldName });
-        }
-        
-        connectWebSocket();
+    switch(status) {
+        case 'connected':
+            element.textContent = 'Conectado';
+            element.className = 'fw-bold text-success';
+            break;
+        case 'disconnected':
+            element.textContent = 'Desconectado';
+            element.className = 'fw-bold text-danger';
+            break;
+        case 'error':
+            element.textContent = 'Error';
+            element.className = 'fw-bold text-warning';
+            break;
+        default:
+            element.textContent = 'Desconocido';
+            element.className = 'fw-bold text-secondary';
     }
 }
 
-function clearMonitoringDisplays() {
-    document.getElementById('lastMovement').innerHTML = '<p class="text-secondary">Cargando...</p>';
-    document.getElementById('last10Movements').innerHTML = '<p class="text-secondary">Cargando...</p>';
-    document.getElementById('lastObstacle').innerHTML = '<p class="text-secondary">Cargando...</p>';
-    document.getElementById('last10Obstacles').innerHTML = '<p class="text-secondary">Cargando...</p>';
+function disconnectWebSockets() {
+    if (wsMovement) {
+        wsMovement.close();
+        wsMovement = null;
+    }
+    if (wsObstacle) {
+        wsObstacle.close();
+        wsObstacle = null;
+    }
 }
 
 // --- 3. Utilidades de UI y Manejo de API ---
@@ -762,7 +240,6 @@ function showAlert(message, type = 'info') {
 
     alertContainer.appendChild(alertDiv);
     
-    // Auto-destruir después de 5 segundos
     setTimeout(() => {
         if (alertDiv.parentNode) {
             const bsAlert = bootstrap.Alert.getOrCreateInstance(alertDiv);
@@ -771,75 +248,60 @@ function showAlert(message, type = 'info') {
     }, 5000);
 }
 
-function changeTab(tabId) {
-    if (tabId === 'monitor') {
-        // Si no hay datos en cache, cargar via REST
-        if (movementCache.length === 0) {
-            loadMovementLogs();
-        }
-        if (obstacleCache.length === 0) {
-            loadObstacleLogs();
-        }
-        
-        // También solicitar datos inmediatos via WebSocket
-        requestImmediateData();
+function logToWS(type, message) {
+    const wsLog = document.getElementById('wsLog');
+    const now = new Date().toLocaleTimeString();
+    const logEntry = `<p class="small mb-1">[${now}] [${type}] ${message}</p>`;
+    
+    const currentLogs = wsLog.innerHTML;
+    const logsArray = currentLogs.split('</p>').filter(log => log.trim() !== '');
+    logsArray.unshift(logEntry);
+    
+    if (logsArray.length > 10) {
+        logsArray.length = 10;
+    }
+    
+    wsLog.innerHTML = logsArray.join('</p>') + '</p>';
+}
+
+// --- 4. Funciones de Ubicación y Tiempo ---
+
+async function obtenerIP() {
+    try {
+        const response = await fetch('https://api.ipify.org?format=json');
+        const data = await response.json();
+        return data.ip;
+    } catch (error) {
+        console.warn('No se pudo obtener la IP:', error);
+        return 'Desconocida';
     }
 }
 
-function formatLogData(data, isList = false) {
-    if (!data || (isList && data.length === 0)) {
-        return `<p class="text-secondary small">No hay registros para ${DEVICE_NAME}.</p>`;
-    }
-    
-    const list = isList ? data : [data];
-    let html = '';
-    
-    list.forEach(item => {
-        if (!item) return;
-        
-        // Texto principal
-        const operation = item.operacion_texto || item.sugerencia_texto || item.obstaculo_texto || item.operacion || 'N/A';
-        const type = item.operacion_texto || item.operacion ? 'MOVIMIENTO' : 'OBSTÁCULO';
-        const icon = item.operacion_texto || item.operacion ? 'bi-arrow-right-circle' : 'bi-cone-striped';
-        const textColor = item.operacion_texto || item.operacion ? 'text-info' : 'text-warning';
-        
-        // Detalles de tiempo
-        const timeDetail = item.event_at ? 
-            `Hace ${getTimeAgo(new Date(item.event_at))} (${new Date(item.event_at).toLocaleTimeString()})` : 
-            item.scheduled_at ? 
-            `Programado: ${new Date(item.scheduled_at).toLocaleString()}` : 
-            'Sin timestamp';
-
-        // Detalles de ubicación
-        const locationDetail = (item.ciudad && item.pais) ? 
-            `${item.ciudad}, ${item.pais}` : 
-            (item.ip ? `IP: ${item.ip}` : '');
-
-        html += `<div class="py-2 border-bottom border-secondary">
-            <p class="small fw-bold ${textColor} mb-1">
-                <i class="bi ${icon} me-1"></i> [${type}] ${operation}
-            </p>
-            <p class="small text-secondary mb-0 ps-3">
-                <i class="bi bi-clock me-1"></i>${timeDetail}
-                ${item.lat && item.lon ? `<br><i class="bi bi-pin-map me-1"></i>${item.lat.toFixed(4)}, ${item.lon.toFixed(4)}` : ''}
-            </p>
-            ${item.id ? `<p class="small text-muted mb-0 ps-3">ID: ${item.id}</p>` : ''}
-        </div>`;
-    });
-    return html;
-}
-
-function getTimeAgo(date) {
+function obtenerTimestampActual() {
     const now = new Date();
-    const diffMs = now - date;
-    const diffMins = Math.floor(diffMs / 60000);
-    const diffHours = Math.floor(diffMs / 3600000);
-    
-    if (diffMs < 60000) return 'hace unos segundos';
-    if (diffMins < 60) return `hace ${diffMins} minuto${diffMins > 1 ? 's' : ''}`;
-    if (diffHours < 24) return `hace ${diffHours} hora${diffHours > 1 ? 's' : ''}`;
-    return `hace ${Math.floor(diffHours / 24)} días`;
+    return now.toLocaleString('es-MX', {
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        hour: '2-digit',
+        minute: '2-digit',
+        second: '2-digit',
+        hour12: false
+    });
 }
+
+function obtenerDatosUbicacion() {
+    return {
+        ip: ubicacionReal.ip,
+        pais: ubicacionReal.pais,
+        ciudad: ubicacionReal.ciudad,
+        latitud: ubicacionReal.lat,
+        longitud: ubicacionReal.lon,
+        timestamp: obtenerTimestampActual()
+    };
+}
+
+// --- 5. Funciones de API REST ---
 
 async function postData(endpoint, data) {
     try {
@@ -849,15 +311,7 @@ async function postData(endpoint, data) {
                 'Content-Type': 'application/json',
                 'Accept': 'application/json'
             },
-            body: JSON.stringify(data),
-            mode: 'cors',
-            credentials: 'omit'
-            // ════════════════════════════════════════════════════
-            // CONFIGURACIÓN LOCAL (COMENTADA) - DESCOMENTAR PARA DESARROLLO LOCAL
-            /*
-            mode: 'no-cors',  // Para desarrollo local sin CORS
-            */
-            // ════════════════════════════════════════════════════
+            body: JSON.stringify(data)
         });
 
         if (!response.ok) {
@@ -880,15 +334,7 @@ async function fetchData(endpoint) {
             method: 'GET',
             headers: {
                 'Accept': 'application/json'
-            },
-            mode: 'cors',
-            credentials: 'omit'
-            // ════════════════════════════════════════════════════
-            // CONFIGURACIÓN LOCAL (COMENTADA) - DESCOMENTAR PARA DESARROLLO LOCAL
-            /*
-            mode: 'no-cors',  // Para desarrollo local sin CORS
-            */
-            // ════════════════════════════════════════════════════
+            }
         });
 
         if (!response.ok) {
@@ -905,64 +351,162 @@ async function fetchData(endpoint) {
     }
 }
 
-// --- 4. Controladores de Eventos de la Interfaz ---
+// --- 6. Controladores de Eventos ---
 
+// Caches locales
+let movementCache = [];
+let obstacleCache = [];
 
+function handleMovementEvent(eventData) {
+    if (!eventData) return;
+    
+    console.log('🔄 Procesando evento de movimiento:', eventData);
+    
+    // EXTRAER LOS DATOS REALES - manejar diferentes estructuras
+    let movementData = eventData;
+    
+    // Si viene con estructura {type: 'movement_last', data: {...}}
+    if (eventData.data && (eventData.type === 'movement_last' || eventData.type === 'movement_update')) {
+        movementData = eventData.data;
+        console.log('📦 Extrayendo datos de movimiento del wrapper:', movementData);
+    }
+    // Si viene con estructura {movement: {...}}
+    else if (eventData.movement) {
+        movementData = eventData.movement;
+        console.log('📦 Extrayendo datos de movimiento de propiedad movement:', movementData);
+    }
+    
+    if (!movementData || !movementData.id) {
+        console.log('❌ Datos de movimiento inválidos:', movementData);
+        return;
+    }
+    
+    const existingIndex = movementCache.findIndex(m => m.id === movementData.id);
+    if (existingIndex >= 0) {
+        movementCache[existingIndex] = movementData;
+        console.log('📝 Movimiento actualizado en cache');
+    } else {
+        movementCache.unshift(movementData);
+        console.log('📝 Nuevo movimiento agregado al cache');
+    }
+    
+    if (movementCache.length > 50) {
+        movementCache = movementCache.slice(0, 50);
+    }
+    
+    console.log('📊 Cache de movimientos actualizado. Total:', movementCache.length);
+    
+    // ACTUALIZAR UI INMEDIATAMENTE
+    updateMovementDisplay();
+}
+
+function handleObstacleEvent(eventData) {
+    if (!eventData) return;
+    
+    console.log('🔄 Procesando evento de obstáculo:', eventData);
+    
+    // EXTRAER LOS DATOS REALES - manejar diferentes estructuras
+    let obstacleData = eventData;
+    
+    // Si viene con estructura {type: 'obstacle_last', data: {...}}
+    if (eventData.data && (eventData.type === 'obstacle_last' || eventData.type === 'obstacle_update')) {
+        obstacleData = eventData.data;
+        console.log('📦 Extrayendo datos de obstáculo del wrapper:', obstacleData);
+    }
+    // Si viene con estructura {obstacle: {...}}
+    else if (eventData.obstacle) {
+        obstacleData = eventData.obstacle;
+        console.log('📦 Extrayendo datos de obstáculo de propiedad obstacle:', obstacleData);
+    }
+    
+    if (!obstacleData || !obstacleData.id) {
+        console.log('❌ Datos de obstáculo inválidos:', obstacleData);
+        return;
+    }
+    
+    const existingIndex = obstacleCache.findIndex(o => o.id === obstacleData.id);
+    if (existingIndex >= 0) {
+        obstacleCache[existingIndex] = obstacleData;
+        console.log('📝 Obstáculo actualizado en cache');
+    } else {
+        obstacleCache.unshift(obstacleData);
+        console.log('📝 Nuevo obstáculo agregado al cache');
+    }
+    
+    if (obstacleCache.length > 50) {
+        obstacleCache = obstacleCache.slice(0, 50);
+    }
+    
+    console.log('📊 Cache de obstáculos actualizado. Total:', obstacleCache.length);
+    
+    // ACTUALIZAR UI INMEDIATAMENTE
+    updateObstacleDisplay();
+}
+
+// Operaciones que soportan velocidad (solo Adelante y Atrás)
+const OPERACIONES_CON_VELOCIDAD = [1, 2]; // 1: Adelante, 2: Atrás
 function sendMovement(op_clave) {
     const op_name = Object.keys(OPERACION_MAP).find(key => OPERACION_MAP[key] === op_clave);
     
-    // Si hay un movimiento en curso y se envía uno nuevo, cancelar el anterior
-    if (carritoEstado.moviendose && carritoEstado.timeoutMovimiento) {
-        clearTimeout(carritoEstado.timeoutMovimiento);
-        carritoEstado.moviendose = false;
-        console.log('🔄 Movimiento anterior cancelado');
+    // Obtener velocidad seleccionada solo para operaciones que la soportan
+    let velocidad = 0;
+    if (OPERACIONES_CON_VELOCIDAD.includes(op_clave)) {
+        const speedSelector = document.getElementById('speedSelector');
+        velocidad = speedSelector ? parseInt(speedSelector.value) : 75;
+        console.log(`🚀 Movimiento ${op_name} con velocidad: ${velocidad}`);
+    } else {
+        console.log(`↪️ Movimiento especial ${op_name} - sin control de velocidad`);
     }
     
-    // Obtener datos de ubicación actualizados
+    // Limpiar timeout de movimiento anterior si existe
+    if (carritoEstado.timeoutMovimiento) {
+        clearTimeout(carritoEstado.timeoutMovimiento);
+        carritoEstado.timeoutMovimiento = null;
+    }
+    
     const datosUbicacion = obtenerDatosUbicacion();
     
     const data = {
         device_name: DEVICE_NAME,
         operacion: op_clave,
+        speed: velocidad,
         ip: datosUbicacion.ip,
         pais: datosUbicacion.pais,
         ciudad: datosUbicacion.ciudad,
         latitud: datosUbicacion.latitud,
         longitud: datosUbicacion.longitud,
-        event_at: datosUbicacion.timestamp  // Usar timestamp actual
+        event_at: datosUbicacion.timestamp
     };
+    
+    console.log('📤 Enviando movimiento con datos:', data);
     
     postData('/movement/', data).then(result => {
         if (result) {
-            // Para movimientos de Adelante (1) y Atrás (2), establecer duración de 1 segundo
             if (op_clave === 1 || op_clave === 2) {
+                // MOVIMIENTOS CONTINUOS: Adelante y Atrás
                 carritoEstado.moviendose = true;
                 carritoEstado.movimientoActual = op_clave;
                 
-                console.log(`▶️ Iniciando movimiento ${op_name} por ${carritoEstado.duracionMovimiento}ms`);
-                
-                // Establecer timeout para auto-detener después de 1 segundo
-                carritoEstado.timeoutMovimiento = setTimeout(() => {
-                    if (carritoEstado.moviendose) {
-                        console.log('⏱️ Movimiento auto-deternido después de 1 segundo');
-                        sendMovement(3); // Auto-detener después de 1 segundo
-                        carritoEstado.moviendose = false;
-                        carritoEstado.movimientoActual = null;
-                        showAlert('Movimiento completado (1 segundo)', 'info');
-                    }
-                }, carritoEstado.duracionMovimiento);
+                console.log(`▶️ Movimiento ${op_name} iniciado (continuo hasta detener)`);
+                showAlert(`Movimiento ${op_name} iniciado - Se mantendrá hasta enviar "Detener"`, 'info');
                 
             } else if (op_clave === 3) {
-                // Si es detener, limpiar estado
+                // DETENER - Limpiar estado de movimiento continuo
                 carritoEstado.moviendose = false;
                 carritoEstado.movimientoActual = null;
-                if (carritoEstado.timeoutMovimiento) {
-                    clearTimeout(carritoEstado.timeoutMovimiento);
-                }
+                
                 console.log('🛑 Movimiento detenido manualmente');
+                showAlert('Movimiento detenido', 'warning');
+                
             } else {
-                // Para otros movimientos (giros, vueltas), no aplicar duración fija
-                console.log(`↪️ Movimiento especial: ${op_name}`);
+                // MOVIMIENTOS ESPECIALES (giros, vueltas) - se ejecutan una vez
+                console.log(`↪️ Movimiento especial ejecutado: ${op_name}`);
+                
+                // Para movimientos especiales, podemos agregar un pequeño feedback visual
+                // pero no afectan el estado de movimiento continuo
+                setTimeout(() => {
+                    showAlert(`Movimiento especial completado: ${op_name}`, 'success');
+                }, 500);
             }
         }
     });
@@ -971,7 +515,6 @@ function sendMovement(op_clave) {
 function sendObstacle(obst_clave) {
     const obst_name = Object.keys(OBSTACULO_MAP).find(key => OBSTACULO_MAP[key] === obst_clave);
     
-    // Obtener datos de ubicación actualizados
     const datosUbicacion = obtenerDatosUbicacion();
     
     const data = {
@@ -982,7 +525,7 @@ function sendObstacle(obst_clave) {
         ciudad: datosUbicacion.ciudad,
         latitud: datosUbicacion.latitud,
         longitud: datosUbicacion.longitud,
-        event_at: datosUbicacion.timestamp  // Usar timestamp actual
+        event_at: datosUbicacion.timestamp
     };
 
     postData('/obstacle/', data).then(result => {
@@ -996,12 +539,9 @@ function sendObstacle(obst_clave) {
                 <strong class="text-info">Sugerencia:</strong> ${result.sugerencia_texto || 'N/A'}
             `;
             
-            // Si hay una secuencia en ejecución, interrumpirla y procesar el obstáculo
             if (ejecucionSecuencia.activa && !ejecucionSecuencia.pausada) {
                 interrumpirSecuenciaPorObstaculo(result);
-            } 
-            // Si hay un movimiento manual en curso, detenerlo
-            else if (carritoEstado.moviendose) {
+            } else if (carritoEstado.moviendose) {
                 detenerPorObstaculo();
             }
             
@@ -1015,68 +555,59 @@ function detenerPorObstaculo() {
     if (carritoEstado.moviendose) {
         console.log('🚫 Obstáculo detectado - Deteniendo movimiento en curso');
         
-        // Cancelar el timeout de auto-detener
+        // Limpiar timeout si existe
         if (carritoEstado.timeoutMovimiento) {
             clearTimeout(carritoEstado.timeoutMovimiento);
+            carritoEstado.timeoutMovimiento = null;
         }
         
         // Enviar comando de detener
         sendMovement(3);
         
-        // Mostrar alerta específica
         showAlert('¡Obstáculo detectado! Movimiento detenido automáticamente', 'warning');
         
-        // Actualizar estado inmediatamente
         carritoEstado.moviendose = false;
         carritoEstado.movimientoActual = null;
     }
 }
 
-// --- AGREGAR función para interrumpir secuencia por obstáculo ---
 function interrumpirSecuenciaPorObstaculo(obstaculoData) {
     if (!ejecucionSecuencia.activa || ejecucionSecuencia.pausada) return;
     
     console.log('🚫 OBSTÁCULO - Interrumpiendo secuencia en curso');
     
-    // Pausar la secuencia actual
     ejecucionSecuencia.pausada = true;
-    
-    // Guardar información del paso actual
     const pasoActual = ejecucionSecuencia.pasos[ejecucionSecuencia.pasoActual];
     ejecucionSecuencia.pasoInterrumpido = ejecucionSecuencia.pasoActual;
     
-    // Calcular tiempo restante del paso actual (aproximado)
     const tiempoTranscurrido = new Date() - ejecucionSecuencia.inicioEjecucion;
     const tiempoTotalPasos = ejecucionSecuencia.pasos.slice(0, ejecucionSecuencia.pasoActual)
         .reduce((sum, paso) => sum + paso.duracion_ms, 0);
     const tiempoTranscurridoPaso = tiempoTranscurrido - tiempoTotalPasos;
     ejecucionSecuencia.tiempoRestantePaso = Math.max(0, pasoActual.duracion_ms - tiempoTranscurridoPaso);
     
-    // Detener todos los timeouts de la secuencia
     ejecucionSecuencia.timeoutPasos.forEach(timeout => clearTimeout(timeout));
     ejecucionSecuencia.timeoutPasos = [];
     
-    // Enviar comando de detener inmediatamente
-    sendMovement(3);
+    // Detener cualquier movimiento continuo del carrito
+    if (carritoEstado.moviendose) {
+        sendMovement(3);
+    }
     
-    // Log de interrupción
     agregarLogEjecucion(`🚫 SECUENCIA INTERRUMPIDA - Obstáculo detectado: ${obstaculoData.obstaculo_texto}`);
     agregarLogEjecucion(`💡 Sugerencia: ${obstaculoData.sugerencia_texto}`);
     
     showAlert('¡Obstáculo detectado! Secuencia interrumpida para evasión', 'warning');
     
-    // Procesar la evasión basada en la sugerencia
     procesarEvasionObstaculo(obstaculoData);
 }
 
-// --- AGREGAR función para procesar evasión de obstáculo ---
 function procesarEvasionObstaculo(obstaculoData) {
     const sugerencia = obstaculoData.sugerencia_texto;
     
     console.log(`🔄 Procesando evasión: ${sugerencia}`);
     agregarLogEjecucion(`🔄 Ejecutando evasión: ${sugerencia}`);
     
-    // Mapear sugerencias a movimientos específicos
     const evasionMap = {
         'Detener': 3,
         'Retroceder': 2,
@@ -1085,9 +616,8 @@ function procesarEvasionObstaculo(obstaculoData) {
         'Avanzar con precaución': 1
     };
     
-    let movimientoEvasion = 3; // Por defecto: detener
+    let movimientoEvasion = 3;
     
-    // Buscar la sugerencia en el mapa
     for (const [key, value] of Object.entries(evasionMap)) {
         if (sugerencia.includes(key)) {
             movimientoEvasion = value;
@@ -1095,165 +625,107 @@ function procesarEvasionObstaculo(obstaculoData) {
         }
     }
     
-    // Ejecutar movimiento de evasión
     console.log(`↪️ Ejecutando movimiento de evasión: ${movimientoEvasion}`);
     
-    // Pequeño delay antes de la evasión para asegurar que se detuvo
     setTimeout(() => {
         sendMovement(movimientoEvasion);
         
-        // Programar reanudación después de la evasión
         setTimeout(() => {
             reanudarSecuenciaDespuesObstaculo();
-        }, 2000); // 2 segundos para la evasión
+        }, 2000);
         
     }, 500);
 }
 
-// --- AGREGAR función para reanudar secuencia después de obstáculo ---
 function reanudarSecuenciaDespuesObstaculo() {
     if (!ejecucionSecuencia.activa || !ejecucionSecuencia.pausada) return;
     
     console.log('🔄 REANUDANDO secuencia después de evasión de obstáculo');
     agregarLogEjecucion('🔄 REANUDANDO secuencia después de evasión');
     
-    // Reestablecer estado de la secuencia
     ejecucionSecuencia.pausada = false;
-    ejecucionSecuencia.inicioEjecucion = new Date(); // Reiniciar tiempo de referencia
-    
-    // Continuar con el siguiente paso (no repetir el interrumpido para evitar duplicados)
-    // El movimiento de evasión ya debería haber completado la acción necesaria
+    ejecucionSecuencia.inicioEjecucion = new Date();
     ejecucionSecuencia.pasoActual = ejecucionSecuencia.pasoInterrumpido + 1;
-    
-    // Limpiar información de interrupción
     ejecucionSecuencia.pasoInterrumpido = null;
     ejecucionSecuencia.tiempoRestantePaso = 0;
     
-    // Continuar con la ejecución normal
     if (ejecucionSecuencia.pasoActual < ejecucionSecuencia.totalPasos) {
         agregarLogEjecucion(`▶️ Reanudando desde paso ${ejecucionSecuencia.pasoActual + 1}`);
         ejecutarSiguientePaso();
     } else {
-        // Si ya no hay más pasos, finalizar
         finalizarEjecucionSecuencia();
     }
     
     showAlert('Secuencia reanudada después de evasión de obstáculo', 'success');
 }
 
+// --- 7. Funciones de Monitoreo y UI ---
 
-
-
-function obtenerEstadoCarrito() {
-    return {
-        moviendose: carritoEstado.moviendose,
-        movimientoActual: carritoEstado.movimientoActual ? 
-            Object.keys(OPERACION_MAP).find(key => OPERACION_MAP[key] === carritoEstado.movimientoActual) : 
-            'Detenido',
-        tiempoRestante: carritoEstado.moviendose ? 'En progreso...' : 'N/A'
-    };
+function changeTab(tabId) {
+    if (tabId === 'monitor') {
+        if (movementCache.length === 0) {
+            loadMovementLogs();
+        }
+        if (obstacleCache.length === 0) {
+            loadObstacleLogs();
+        }
+    }
 }
 
-// --- AGREGAR función para ver estado (debug) ---
-function verEstadoCarrito() {
-    const estado = obtenerEstadoCarrito();
-    console.log('📊 Estado del carrito:', estado);
-    showAlert(`Estado: ${estado.movimientoActual} | En movimiento: ${estado.moviendose}`, 'info');
+function updateDeviceName(newName) {
+    if (newName && newName !== DEVICE_NAME) {
+        const oldName = DEVICE_NAME;
+        DEVICE_NAME = newName;
+        
+        showAlert(`Cambiando dispositivo de ${oldName} a ${DEVICE_NAME}. Reconectando WS...`, 'info');
+        
+        movementCache = [];
+        obstacleCache = [];
+        
+        clearMonitoringDisplays();
+        
+        disconnectWebSockets();
+        setTimeout(() => connectWebSockets(), 1000);
+    }
 }
 
-// --- MODIFICAR la inicialización para resetear estado ---
-
-document.addEventListener('DOMContentLoaded', function() {
-    console.log('🚀 Inicializando aplicación IoT Carrito para AWS...');
-    
-    // CONFIGURACIÓN AWS
-    console.log('📍 Entorno: AWS EC2 Instance');
-    console.log('🔗 API URL:', API_BASE_URL);
-    console.log('🔗 WebSocket URL:', WS_BASE_URL);
-    
-    showAlert('🔗 Conectando a instancia AWS EC2...', 'info');
-
-    // Inicializar estado
-    const obstRes = document.getElementById('obstacleResult');
-    if (obstRes) obstRes.classList.add('hidden');
-
-    movementCache = [];
-    obstacleCache = [];
-    carritoEstado = {
-        moviendose: false,
-        movimientoActual: null,
-        timeoutMovimiento: null,
-        duracionMovimiento: 2000
-    };
-
-    clearMonitoringDisplays();
-
-    // Iniciar conexión WebSocket INMEDIATAMENTE
-    console.log('🔄 Iniciando conexión WebSocket...');
-    connectWebSocket();
-    
-    // Cargar datos después de 3 segundos (dar tiempo a WebSocket)
-    setTimeout(() => {
-        loadMovementLogs();
-        loadObstacleLogs();
-    }, 3000);
-
-    console.log('✅ Aplicación inicializada. WebSocket iniciado.');
-});
-// --- 5. Manejo de Eventos WebSocket para Monitoreo ---
-
-function handleMovementEvent(eventData) {
-    if (!eventData) return;
-    
-    console.log('🔄 Procesando evento de movimiento:', eventData);
-    
-    // Actualizar cache
-    const existingIndex = movementCache.findIndex(m => m.id === eventData.id);
-    if (existingIndex >= 0) {
-        movementCache[existingIndex] = eventData;
-    } else {
-        movementCache.unshift(eventData);
-    }
-    
-    // Mantener máximo 50 elementos
-    if (movementCache.length > 50) {
-        movementCache = movementCache.slice(0, 50);
-    }
-    
-    // Actualizar UI
-    updateMovementDisplay();
-}
-
-function handleObstacleEvent(eventData) {
-    if (!eventData) return;
-    
-    console.log('🔄 Procesando evento de obstáculo:', eventData);
-    
-    // Actualizar cache
-    const existingIndex = obstacleCache.findIndex(o => o.id === eventData.id);
-    if (existingIndex >= 0) {
-        obstacleCache[existingIndex] = eventData;
-    } else {
-        obstacleCache.unshift(eventData);
-    }
-    
-    // Mantener máximo 50 elementos
-    if (obstacleCache.length > 50) {
-        obstacleCache = obstacleCache.slice(0, 50);
-    }
-    
-    // Actualizar UI
-    updateObstacleDisplay();
+function clearMonitoringDisplays() {
+    document.getElementById('lastMovement').innerHTML = '<p class="text-secondary">Cargando...</p>';
+    document.getElementById('last10Movements').innerHTML = '<p class="text-secondary">Cargando...</p>';
+    document.getElementById('lastObstacle').innerHTML = '<p class="text-secondary">Cargando...</p>';
+    document.getElementById('last10Obstacles').innerHTML = '<p class="text-secondary">Cargando...</p>';
 }
 
 function updateMovementDisplay() {
     const lastMovDiv = document.getElementById('lastMovement');
     const last10MovDiv = document.getElementById('last10Movements');
     
+    if (!lastMovDiv || !last10MovDiv) {
+        console.log('❌ Elementos de UI de movimientos no encontrados');
+        return;
+    }
+    
+    console.log('🔄 Actualizando UI de movimientos. Cache:', movementCache.length, 'elementos');
+    
     if (movementCache.length > 0) {
-        lastMovDiv.innerHTML = formatLogData(movementCache[0]);
-        last10MovDiv.innerHTML = formatLogData(movementCache.slice(0, 10), true);
+        const lastMovement = movementCache[0];
+        const last10Movements = movementCache.slice(0, 10);
+        
+        console.log('📝 Mostrando último movimiento:', lastMovement.operacion_texto || lastMovement.operacion);
+        console.log('📝 Mostrando últimos 10 movimientos:', last10Movements.length);
+        
+        lastMovDiv.innerHTML = formatLogData(lastMovement);
+        last10MovDiv.innerHTML = formatLogData(last10Movements, true);
+        
+        // Efecto visual de actualización
+        lastMovDiv.style.transition = 'background-color 0.3s';
+        lastMovDiv.style.backgroundColor = 'rgba(0, 255, 0, 0.2)';
+        setTimeout(() => {
+            lastMovDiv.style.backgroundColor = '';
+        }, 1000);
+        
     } else {
+        console.log('📝 No hay movimientos en cache para mostrar');
         lastMovDiv.innerHTML = '<p class="text-secondary small">No hay movimientos recientes</p>';
         last10MovDiv.innerHTML = '<p class="text-secondary small">No hay movimientos para mostrar</p>';
     }
@@ -1263,32 +735,110 @@ function updateObstacleDisplay() {
     const lastObstDiv = document.getElementById('lastObstacle');
     const last10ObstDiv = document.getElementById('last10Obstacles');
     
+    if (!lastObstDiv || !last10ObstDiv) {
+        console.log('❌ Elementos de UI de obstáculos no encontrados');
+        return;
+    }
+    
+    console.log('🔄 Actualizando UI de obstáculos. Cache:', obstacleCache.length, 'elementos');
+    
     if (obstacleCache.length > 0) {
-        lastObstDiv.innerHTML = formatLogData(obstacleCache[0]);
-        last10ObstDiv.innerHTML = formatLogData(obstacleCache.slice(0, 10), true);
+        const lastObstacle = obstacleCache[0];
+        const last10Obstacles = obstacleCache.slice(0, 10);
+        
+        console.log('📝 Mostrando último obstáculo:', lastObstacle.obstaculo_texto || lastObstacle.obstaculo);
+        console.log('📝 Mostrando últimos 10 obstáculos:', last10Obstacles.length);
+        
+        lastObstDiv.innerHTML = formatLogData(lastObstacle);
+        last10ObstDiv.innerHTML = formatLogData(last10Obstacles, true);
+        
+        // Efecto visual de actualización
+        lastObstDiv.style.transition = 'background-color 0.3s';
+        lastObstDiv.style.backgroundColor = 'rgba(255, 255, 0, 0.2)';
+        setTimeout(() => {
+            lastObstDiv.style.backgroundColor = '';
+        }, 1000);
+        
     } else {
+        console.log('📝 No hay obstáculos en cache para mostrar');
         lastObstDiv.innerHTML = '<p class="text-secondary small">No hay obstáculos recientes</p>';
         last10ObstDiv.innerHTML = '<p class="text-secondary small">No hay obstáculos para mostrar</p>';
     }
 }
 
-// --- 6. Funciones de Monitoreo (REST como fallback) ---
+function formatLogData(data, isList = false) {
+    if (!data || (isList && data.length === 0)) {
+        return `<p class="text-secondary small">No hay registros para ${DEVICE_NAME}.</p>`;
+    }
+    
+    const list = isList ? data : [data];
+    let html = '';
+    
+    list.forEach(item => {
+        if (!item) return;
+        
+        const operation = item.operacion_texto || item.sugerencia_texto || item.obstaculo_texto || item.operacion || 'N/A';
+        const type = item.operacion_texto || item.operacion ? 'MOVIMIENTO' : 'OBSTÁCULO';
+        const icon = item.operacion_texto || item.operacion ? 'bi-arrow-right-circle' : 'bi-cone-striped';
+        const textColor = item.operacion_texto || item.operacion ? 'text-info' : 'text-warning';
+        
+        const timeDetail = item.event_at ? 
+            `Hace ${getTimeAgo(new Date(item.event_at))} (${new Date(item.event_at).toLocaleTimeString()})` : 
+            item.scheduled_at ? 
+            `Programado: ${new Date(item.scheduled_at).toLocaleString()}` : 
+            'Sin timestamp';
+
+        const locationDetail = (item.ciudad && item.pais) ? 
+            `${item.ciudad}, ${item.pais}` : 
+            (item.ip ? `IP: ${item.ip}` : '');
+
+        // MOSTRAR VELOCIDAD SI EXISTE
+        const speedDetail = item.speed ? 
+            `<br><i class="bi bi-speedometer2 me-1"></i>Velocidad: ${item.speed}` : 
+            '';
+
+        html += `<div class="py-2 border-bottom border-secondary">
+            <p class="small fw-bold ${textColor} mb-1">
+                <i class="bi ${icon} me-1"></i> [${type}] ${operation}
+            </p>
+            <p class="small text-secondary mb-0 ps-3">
+                <i class="bi bi-clock me-1"></i>${timeDetail}
+                ${speedDetail}
+                ${item.lat && item.lon ? `<br><i class="bi bi-pin-map me-1"></i>${item.lat.toFixed(4)}, ${item.lon.toFixed(4)}` : ''}
+            </p>
+            ${item.id ? `<p class="small text-muted mb-0 ps-3">ID: ${item.id}</p>` : ''}
+        </div>`;
+    });
+    return html;
+}
+
+function getTimeAgo(date) {
+    const now = new Date();
+    const diffMs = now - date;
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    
+    if (diffMs < 60000) return 'hace unos segundos';
+    if (diffMins < 60) return `hace ${diffMins} minuto${diffMins > 1 ? 's' : ''}`;
+    if (diffHours < 24) return `hace ${diffHours} hora${diffHours > 1 ? 's' : ''}`;
+    return `hace ${Math.floor(diffHours / 24)} días`;
+}
 
 async function loadMovementLogs() {
     const lastMovDiv = document.getElementById('lastMovement');
     const last10MovDiv = document.getElementById('last10Movements');
     
+    if (!lastMovDiv || !last10MovDiv) return;
+    
     lastMovDiv.innerHTML = '<p class="text-info small">Cargando último movimiento...</p>';
     last10MovDiv.innerHTML = '<p class="text-info small">Cargando últimos 10 movimientos...</p>';
     
     try {
-        // Cargar último movimiento
         const lastMov = await fetchData(`/movement/${DEVICE_NAME}/last`);
         if (lastMov && !Array.isArray(lastMov)) {
             movementCache.unshift(lastMov);
         }
         
-        // Cargar últimos 10 movimientos
         const last10Mov = await fetchData(`/movement/${DEVICE_NAME}/last10`);
         if (last10Mov && Array.isArray(last10Mov)) {
             movementCache = [...last10Mov, ...movementCache.filter(m => 
@@ -1296,14 +846,11 @@ async function loadMovementLogs() {
             )];
         }
         
-        // Limitar cache
         movementCache = movementCache.slice(0, 50);
-        
         updateMovementDisplay();
         
     } catch (error) {
         console.error('Error cargando movimientos:', error);
-        // Mantener lo que haya en cache
         updateMovementDisplay();
     }
 }
@@ -1312,17 +859,17 @@ async function loadObstacleLogs() {
     const lastObstDiv = document.getElementById('lastObstacle');
     const last10ObstDiv = document.getElementById('last10Obstacles');
     
+    if (!lastObstDiv || !last10ObstDiv) return;
+    
     lastObstDiv.innerHTML = '<p class="text-info small">Cargando último obstáculo...</p>';
     last10ObstDiv.innerHTML = '<p class="text-info small">Cargando últimos 10 obstáculos...</p>';
     
     try {
-        // Cargar último obstáculo
         const lastObst = await fetchData(`/obstacle/${DEVICE_NAME}/last`);
         if (lastObst && !Array.isArray(lastObst)) {
             obstacleCache.unshift(lastObst);
         }
         
-        // Cargar últimos 10 obstáculos
         const last10Obst = await fetchData(`/obstacle/${DEVICE_NAME}/last10`);
         if (last10Obst && Array.isArray(last10Obst)) {
             obstacleCache = [...last10Obst, ...obstacleCache.filter(o => 
@@ -1330,19 +877,16 @@ async function loadObstacleLogs() {
             )];
         }
         
-        // Limitar cache
         obstacleCache = obstacleCache.slice(0, 50);
-        
         updateObstacleDisplay();
         
     } catch (error) {
         console.error('Error cargando obstáculos:', error);
-        // Mantener lo que haya en cache
         updateObstacleDisplay();
     }
 }
 
-// --- 7. Funciones para Demos (sin cambios) ---
+// --- 8. Funciones para Demos ---
 let manualSteps = [];
 
 function addManualStep() {
@@ -1397,10 +941,22 @@ async function finalizeManualDemo() {
 }
 
 async function createRandomDemo() {
-    const nPasos = parseInt(document.getElementById('nPasos').value);
-    const minMs = parseInt(document.getElementById('minMs').value);
-    const maxMs = parseInt(document.getElementById('maxMs').value);
-    const excluirDetener = document.getElementById('excluirDetener').checked;
+    // Verificar que los elementos existen antes de acceder a ellos
+    const nPasosElement = document.getElementById('nPasos');
+    const minMsElement = document.getElementById('minMs');
+    const maxMsElement = document.getElementById('maxMs');
+    const excluirDetenerElement = document.getElementById('excluirDetener');
+
+    if (!nPasosElement || !minMsElement || !maxMsElement || !excluirDetenerElement) {
+        console.error('❌ No se pudieron encontrar los elementos de control de demo');
+        showAlert('Error: No se pudieron cargar los controles de demo. Recarga la página.', 'danger');
+        return;
+    }
+
+    const nPasos = parseInt(nPasosElement.value);
+    const minMs = parseInt(minMsElement.value);
+    const maxMs = parseInt(maxMsElement.value);
+    const excluirDetener = excluirDetenerElement.checked;
 
     if (nPasos <= 0 || minMs <= 0 || maxMs <= 0 || minMs > maxMs) {
         return showAlert('Parámetros de Demo aleatoria inválidos.', 'danger');
@@ -1414,10 +970,14 @@ async function createRandomDemo() {
         excluir_detener: excluirDetener
     };
 
+    console.log('🎲 Creando demo aleatoria con datos:', data);
+
     const results = await postData('/demo/random/', data);
     if (results && results.secuencia) {
         showAlert(`Demo Aleatoria ID ${results.secuencia.id} creada con ${results.secuencia.n_pasos} pasos.`, 'success');
         loadLast20Demos();
+    } else {
+        showAlert('Error al crear la demo aleatoria', 'danger');
     }
 }
 
@@ -1445,109 +1005,733 @@ async function loadLast20Demos() {
     }
 }
 
-
 function repeatDemo(secuencia_id) {
     const endpoint = `/demo/repeat/${secuencia_id}/${DEVICE_NAME}/`;
     
-    // Limpiar ejecución anterior
+    console.log(`🔄 Solicitando repetición de secuencia ID: ${secuencia_id}`);
     limpiarEjecucionSecuencia();
     
     postData(endpoint, {}).then(result => {
         if (result) {
+            console.log('✅ Respuesta de repeat demo recibida:', result);
+            
             // Debug de la estructura
             debugSecuencia(result);
             
-            // Debug de tiempos
             if (result.movimientos_programados) {
                 debugTiemposSecuencia(result.movimientos_programados);
-            }
-            
-            showAlert(`Repitiendo secuencia ID ${secuencia_id}. Monitoreo iniciado...`, 'info');
-            
-            // Iniciar monitoreo de la secuencia
-            if (result.movimientos_programados && result.movimientos_programados.length > 0) {
-                // Pequeño delay para asegurar que el backend haya programado los movimientos
-                setTimeout(() => {
-                    iniciarMonitoreoSecuencia(secuencia_id, result.movimientos_programados);
-                }, 500);
+                
+                showAlert(`Repitiendo secuencia ID ${secuencia_id}. Monitoreo iniciado...`, 'info');
+                
+                // Iniciar monitoreo inmediatamente - sin timeout
+                iniciarMonitoreoSecuencia(
+                    result.ejecucion?.id || secuencia_id, 
+                    result.movimientos_programados
+                );
             } else {
+                console.error('❌ No hay movimientos programados en la respuesta:', result);
                 showAlert('Error: La secuencia no tiene movimientos programados', 'danger');
             }
+        } else {
+            console.error('❌ Respuesta vacía o inválida de repeat demo');
+            showAlert('Error: No se pudo obtener la secuencia', 'danger');
+        }
+    }).catch(error => {
+        console.error('❌ Error en repeatDemo:', error);
+        showAlert(`Error al repetir secuencia: ${error.message}`, 'danger');
+    });
+}
+
+// --- 9. Funciones de Ejecución de Secuencias ---
+
+function iniciarMonitoreoSecuencia(secuenciaId, movimientosProgramados) {
+    if (!movimientosProgramados || movimientosProgramados.length === 0) {
+        console.log('❌ No hay movimientos programados para monitorear');
+        showAlert('No hay movimientos programados para monitorear', 'danger');
+        return;
+    }
+
+    console.log('🎬 Iniciando monitoreo de secuencia con movimientos:', movimientosProgramados);
+
+    // Limpiar ejecución anterior
+    detenerEjecucionSecuencia();
+
+    const pasosConDuracion = calcularDuraciones(movimientosProgramados);
+    
+    console.log('📋 Pasos con duración calculada:', pasosConDuracion);
+
+    if (pasosConDuracion.length === 0) {
+        console.error('❌ No se pudieron calcular duraciones para los pasos');
+        showAlert('Error: No se pudieron calcular los tiempos de la secuencia', 'danger');
+        return;
+    }
+
+    ejecucionSecuencia = {
+        activa: true,
+        secuenciaId: secuenciaId,
+        pasos: pasosConDuracion,
+        pasoActual: 0,
+        totalPasos: pasosConDuracion.length,
+        timeoutPasos: [],
+        inicioEjecucion: new Date(),
+        pausada: false,
+        pasoInterrumpido: null,
+        tiempoRestantePaso: 0
+    };
+
+    // Mostrar información de la secuencia
+    mostrarInformacionSecuencia();
+    
+    // Iniciar el primer paso
+    console.log(`🚀 Iniciando secuencia ID: ${secuenciaId} con ${pasosConDuracion.length} pasos`);
+    agregarLogEjecucion(`🎬 SECUENCIA INICIADA - ID: ${secuenciaId} | Pasos: ${pasosConDuracion.length}`);
+     // Actualizar UI
+    actualizarUIEjecucionSecuencia();
+    ejecutarSiguientePaso();
+}
+
+function calcularDuraciones(movimientos) {
+    if (!movimientos || movimientos.length === 0) return [];
+    
+    const pasos = [];
+    console.log('⏰ Calculando duraciones para movimientos:', movimientos.length);
+    
+    for (let i = 0; i < movimientos.length; i++) {
+        const movimiento = movimientos[i];
+        const scheduledAt = new Date(movimiento.scheduled_at);
+        
+        let duracion_ms = 2000; // Duración por defecto más larga
+        
+        if (i < movimientos.length - 1) {
+            const nextScheduledAt = new Date(movimientos[i + 1].scheduled_at);
+            duracion_ms = nextScheduledAt - scheduledAt;
+            
+            console.log(`   Paso ${i + 1}: ${movimiento.operacion_texto}`);
+            console.log(`   - Scheduled: ${scheduledAt.toISOString()}`);
+            console.log(`   - Next: ${nextScheduledAt.toISOString()}`);
+            console.log(`   - Duración: ${duracion_ms}ms`);
+            
+            // Asegurar duración mínima y máxima razonable
+            if (duracion_ms < 500) {
+                console.log(`   ⚠️ Duración muy corta (${duracion_ms}ms), usando 2000ms por defecto`);
+                duracion_ms = 2000;
+            } else if (duracion_ms > 30000) {
+                console.log(`   ⚠️ Duración muy larga (${duracion_ms}ms), usando 5000ms máximo`);
+                duracion_ms = 5000;
+            }
+        } else {
+            // Último movimiento - usar duración por defecto
+            console.log(`   Último paso ${i + 1}: ${movimiento.operacion_texto} - Duración por defecto: ${duracion_ms}ms`);
+        }
+        
+        pasos.push({
+            operacion: movimiento.operacion_clave,
+            duracion_ms: duracion_ms,
+            scheduled_at: movimiento.scheduled_at,
+            operacion_texto: movimiento.operacion_texto,
+            movimiento_original: movimiento
+        });
+    }
+    
+    console.log('✅ Duraciones calculadas:', pasos);
+    return pasos;
+}
+
+function ejecutarSiguientePaso() {
+    // Verificar si la secuencia está pausada por obstáculo
+    if (ejecucionSecuencia.pausada) {
+        console.log('⏸️ Secuencia pausada, esperando reanudación...');
+        return;
+    }
+    
+    if (!ejecucionSecuencia.activa) {
+        console.log('❌ Secuencia no activa, no se puede ejecutar siguiente paso');
+        return;
+    }
+    
+    if (ejecucionSecuencia.pasoActual >= ejecucionSecuencia.totalPasos) {
+        console.log('🏁 Todos los pasos completados');
+        finalizarEjecucionSecuencia();
+        return;
+    }
+
+    const paso = ejecucionSecuencia.pasos[ejecucionSecuencia.pasoActual];
+    const numeroPaso = ejecucionSecuencia.pasoActual + 1;
+    
+    // Validar datos del paso
+    if (!paso.operacion || !paso.duracion_ms) {
+        console.error('❌ Paso inválido:', paso);
+        agregarLogEjecucion(`❌ ERROR: Paso ${numeroPaso} tiene datos inválidos. Saltando...`);
+        ejecucionSecuencia.pasoActual++;
+        setTimeout(() => ejecutarSiguientePaso(), 100);
+        return;
+    }
+    
+    // Mostrar el paso actual
+    mostrarPasoActual(numeroPaso, paso);
+    
+    // Calcular tiempo restante total
+    const tiempoRestante = calcularTiempoRestanteTotal();
+    
+    // Actualizar progreso
+    actualizarProgreso(numeroPaso, tiempoRestante);
+    
+    // Log del paso ejecutado
+    const operacionTexto = paso.operacion_texto || 
+                          Object.keys(OPERACION_MAP).find(key => OPERACION_MAP[key] === paso.operacion) || 
+                          `Operación ${paso.operacion}`;
+    
+    console.log(`▶️ Ejecutando paso ${numeroPaso}/${ejecucionSecuencia.totalPasos}: ${operacionTexto} (${paso.duracion_ms}ms)`);
+    agregarLogEjecucion(`▶️ Paso ${numeroPaso}/${ejecucionSecuencia.totalPasos}: ${operacionTexto} (${Math.round(paso.duracion_ms)}ms)`);
+    
+    // Programar el siguiente paso
+    const timeout = setTimeout(() => {
+        // Verificar nuevamente si no está pausada antes de continuar
+        if (!ejecucionSecuencia.pausada && ejecucionSecuencia.activa) {
+            console.log(`✅ Paso ${numeroPaso} completado`);
+            agregarLogEjecucion(`✅ Paso ${numeroPaso} completado`);
+            ejecucionSecuencia.pasoActual++;
+            ejecutarSiguientePaso();
+        }
+    }, paso.duracion_ms);
+
+    ejecucionSecuencia.timeoutPasos.push(timeout);
+}
+
+function mostrarInformacionSecuencia() {
+    const secuenciaInfo = document.getElementById('secuenciaInfo');
+    const secuenciaIdActual = document.getElementById('secuenciaIdActual');
+    const totalPasosSecuencia = document.getElementById('totalPasosSecuencia');
+    
+    if (!secuenciaInfo || !secuenciaIdActual || !totalPasosSecuencia) {
+        console.error('❌ Elementos de información de secuencia no encontrados');
+        return;
+    }
+    
+    secuenciaInfo.classList.remove('hidden');
+    secuenciaIdActual.textContent = ejecucionSecuencia.secuenciaId;
+    totalPasosSecuencia.textContent = ejecucionSecuencia.totalPasos;
+    
+    console.log('📊 Información de secuencia mostrada:', {
+        id: ejecucionSecuencia.secuenciaId,
+        pasos: ejecucionSecuencia.totalPasos
+    });
+}
+function mostrarPasoActual(numeroPaso, paso) {
+    const pasoActualSecuencia = document.getElementById('pasoActualSecuencia');
+    
+    let operacionTexto = paso.operacion_texto;
+    if (!operacionTexto && paso.operacion && OPERACION_MAP) {
+        operacionTexto = Object.keys(OPERACION_MAP).find(key => OPERACION_MAP[key] === paso.operacion);
+    }
+    
+    if (!operacionTexto) {
+        operacionTexto = `Operación ${paso.operacion || 'N/A'}`;
+    }
+    
+    const duracion = paso.duracion_ms ? Math.round(paso.duracion_ms) : 'N/A';
+    pasoActualSecuencia.textContent = `${numeroPaso} - ${operacionTexto} (${duracion}ms)`;
+}
+
+function actualizarProgreso(pasoActual, tiempoRestante) {
+    const barraProgreso = document.getElementById('barraProgresoSecuencia');
+    const progresoTexto = document.getElementById('progresoTexto');
+    const tiempoRestanteSecuencia = document.getElementById('tiempoRestanteSecuencia');
+    const pasoActualSecuencia = document.getElementById('pasoActualSecuencia');
+    
+    if (!barraProgreso || !progresoTexto || !tiempoRestanteSecuencia || !pasoActualSecuencia) {
+        console.error('❌ Elementos de progreso no encontrados');
+        return;
+    }
+    
+    const progreso = (pasoActual / ejecucionSecuencia.totalPasos) * 100;
+    barraProgreso.style.width = `${progreso}%`;
+    progresoTexto.textContent = `${Math.round(progreso)}%`;
+    tiempoRestanteSecuencia.textContent = tiempoRestante;
+    
+    // Cambiar color de la barra según el progreso
+    if (progreso < 50) {
+        barraProgreso.className = 'progress-bar progress-bar-striped progress-bar-animated bg-warning';
+    } else if (progreso < 100) {
+        barraProgreso.className = 'progress-bar progress-bar-striped progress-bar-animated bg-info';
+    } else {
+        barraProgreso.className = 'progress-bar progress-bar-striped progress-bar-animated bg-success';
+    }
+    
+    console.log(`📈 Progreso actualizado: ${Math.round(progreso)}% - Tiempo restante: ${tiempoRestante}`);
+}
+
+function calcularTiempoRestanteTotal() {
+    if (!ejecucionSecuencia.activa) return '0s';
+    
+    let tiempoTotalRestante = 0;
+    for (let i = ejecucionSecuencia.pasoActual; i < ejecucionSecuencia.totalPasos; i++) {
+        tiempoTotalRestante += ejecucionSecuencia.pasos[i].duracion_ms;
+    }
+    
+    if (tiempoTotalRestante < 100) {
+        return '0s';
+    }
+    
+    const segundos = Math.floor(tiempoTotalRestante / 1000);
+    if (segundos < 60) {
+        return `${segundos}s`;
+    } else {
+        const minutos = Math.floor(segundos / 60);
+        const segundosRestantes = segundos % 60;
+        return `${minutos}m ${segundosRestantes}s`;
+    }
+}
+
+function agregarLogEjecucion(mensaje) {
+    const logEjecucion = document.getElementById('logEjecucionSecuencia');
+    const ahora = new Date();
+    const timestamp = ahora.toLocaleTimeString() + '.' + ahora.getMilliseconds().toString().padStart(3, '0');
+    
+    const logEntry = document.createElement('div');
+    logEntry.className = 'border-bottom border-secondary py-1 small';
+    logEntry.innerHTML = `<span class="text-light">[${timestamp}]</span> ${mensaje}`;
+    
+    logEjecucion.prepend(logEntry);
+    
+    const entries = logEjecucion.querySelectorAll('div');
+    if (entries.length > 15) {
+        entries[entries.length - 1].remove();
+    }
+}
+
+function finalizarEjecucionSecuencia() {
+    if (ejecucionSecuencia.activa) {
+        agregarLogEjecucion('✅ SECUENCIA COMPLETADA EXITOSAMENTE');
+        showAlert(`Secuencia ${ejecucionSecuencia.secuenciaId} completada`, 'success');
+    }
+    
+    ejecucionSecuencia.activa = false;
+    actualizarProgreso(ejecucionSecuencia.totalPasos, '0s');
+    document.getElementById('pasoActualSecuencia').textContent = 'COMPLETADO';
+    
+    const barraProgreso = document.getElementById('barraProgresoSecuencia');
+    barraProgreso.className = 'progress-bar bg-success';
+    
+    console.log('🏁 Ejecución de secuencia finalizada');
+}
+
+function detenerEjecucionSecuencia() {
+    if (ejecucionSecuencia.activa) {
+        ejecucionSecuencia.timeoutPasos.forEach(timeout => clearTimeout(timeout));
+        
+        if (!ejecucionSecuencia.pausada) {
+            agregarLogEjecucion('⏹️ SECUENCIA DETENIDA MANUALMENTE');
+        }
+    }
+    
+    ejecucionSecuencia = {
+        activa: false,
+        secuenciaId: null,
+        pasos: [],
+        pasoActual: 0,
+        totalPasos: 0,
+        timeoutPasos: [],
+        inicioEjecucion: null,
+        pausada: false,
+        pasoInterrumpido: null,
+        tiempoRestantePaso: 0
+    };
+}
+
+function limpiarEjecucionSecuencia() {
+    detenerEjecucionSecuencia();
+    
+    document.getElementById('barraProgresoSecuencia').style.width = '0%';
+    document.getElementById('progresoTexto').textContent = '0%';
+    document.getElementById('progresoDetalle').textContent = 'Preparando...';
+    document.getElementById('logEjecucionSecuencia').innerHTML = 
+        '<p class="text-secondary small text-center my-4"><i class="bi bi-info-circle me-2"></i>No hay secuencia en ejecución</p>';
+    
+    // Resetear controles
+    actualizarUIEjecucionSecuencia();
+    
+    console.log('🧹 Monitor de secuencia limpiado');
+}
+
+// --- 10. Funciones de Debug ---
+
+function debugSecuencia(data) {
+    console.log('🐛 DEBUG - Estructura completa de la secuencia:', data);
+    
+    if (data.movimientos_programados) {
+        console.log('📋 Movimientos programados:', data.movimientos_programados);
+        data.movimientos_programados.forEach((paso, index) => {
+            console.log(`   Paso ${index + 1}:`, paso);
+            console.log(`   - Keys:`, Object.keys(paso));
+            console.log(`   - Valores:`, Object.values(paso));
+        });
+    }
+    
+    return data;
+}
+
+function debugTiemposSecuencia(movimientos) {
+    console.log('⏰ DEBUG - Tiempos de la secuencia:');
+    
+    movimientos.forEach((mov, index) => {
+        const scheduled = new Date(mov.scheduled_at);
+        console.log(`   Paso ${index + 1}: ${mov.operacion_texto}`);
+        console.log(`   - Scheduled: ${scheduled.toLocaleTimeString()}.${scheduled.getMilliseconds()}`);
+        
+        if (index < movimientos.length - 1) {
+            const nextScheduled = new Date(movimientos[index + 1].scheduled_at);
+            const diferencia = nextScheduled - scheduled;
+            console.log(`   - Duración calculada: ${diferencia}ms`);
+        } else {
+            console.log(`   - Último paso (duración por defecto: 1000ms)`);
         }
     });
 }
 
-// Llamar esta función después de la inicialización si quieres ubicación en tiempo real
-function actualizarUIUbicacion() {
-    const ubicacionDiv = document.getElementById('ubicacionActual');
-    if (!ubicacionDiv) return;
+// --- 11. Inicialización ---
+// Agregar este evento en el DOMContentLoaded
+document.addEventListener('DOMContentLoaded', function() {
+    const speedSelector = document.getElementById('speedSelector');
+    const currentSpeed = document.getElementById('currentSpeed');
     
-    ubicacionDiv.innerHTML = `
-        <p class="small mb-1"><strong>IP:</strong> ${ubicacionReal.ip}</p>
-        <p class="small mb-1"><strong>Ubicación:</strong> ${ubicacionReal.ciudad}, ${ubicacionReal.pais}</p>
-        <p class="small mb-1"><strong>Coordenadas:</strong> ${ubicacionReal.lat ? ubicacionReal.lat.toFixed(6) : 'N/A'}, ${ubicacionReal.lon ? ubicacionReal.lon.toFixed(6) : 'N/A'}</p>
-        <p class="small mb-0 text-secondary"><strong>Actualizado:</strong> ${new Date(ubicacionReal.timestamp).toLocaleString()}</p>
-    `;
-}
-
-// Función utilitaria para hacer elementos clickeables
-function makeClickable() {
-    document.querySelectorAll('.demo-item').forEach(item => {
-        item.style.cursor = 'pointer';
-        item.addEventListener('mouseenter', function() {
-            this.style.backgroundColor = 'rgba(255,255,255,0.1)';
+    if (speedSelector && currentSpeed) {
+        speedSelector.addEventListener('change', function() {
+            showAlert(`Velocidad configurada a ${this.value} para movimientos lineales`, 'info');
         });
-        item.addEventListener('mouseleave', function() {
-            this.style.backgroundColor = '';
-        });
-    });
-}
+    }
+});
 
-// Función de diagnóstico WebSocket
-function diagnoseWebSocket() {
-    console.log('🔍 DIAGNÓSTICO WEBSOCKET:');
-    console.log('📡 URL WebSocket:', WS_BASE_URL);
-    console.log('🔗 Socket conectado:', socket?.connected);
-    console.log('🆔 Socket ID:', socket?.id);
-    console.log('📊 Estado monitoreo:', isMonitoringActive);
+document.addEventListener('DOMContentLoaded', function() {
+    console.log('🚀 Inicializando aplicación IoT Carrito con WebSockets nativos...');
+    
+    console.log('📍 Entorno: AWS EC2 Instance');
+    console.log('🔗 API URL:', API_BASE_URL);
+    console.log('🔗 WebSocket URL:', WS_BASE_URL);
+    
+    showAlert('🔗 Conectando a instancia AWS EC2 con WebSockets nativos...', 'info');
+
+    // Inicializar estado
+    const obstRes = document.getElementById('obstacleResult');
+    if (obstRes) obstRes.classList.add('hidden');
+
+    movementCache = [];
+    obstacleCache = [];
+    carritoEstado = {
+        moviendose: false,
+        movimientoActual: null,
+        timeoutMovimiento: null
+    };
+
+    clearMonitoringDisplays();
+
+    // Iniciar conexiones WebSocket
+    console.log('🔄 Iniciando conexiones WebSocket nativas...');
+    connectWebSockets();
+    
+    // Cargar datos después de 3 segundos
+    setTimeout(() => {
+        loadMovementLogs();
+        loadObstacleLogs();
+    }, 3000);
+
+    console.log('✅ Aplicación inicializada. WebSockets nativos iniciados.');
+});
+
+// Funciones de diagnóstico
+function diagnoseWebSockets() {
+    console.log('🔍 DIAGNÓSTICO WEBSOCKETS:');
+    console.log('📡 URL WebSocket Base:', WS_BASE_URL);
+    console.log('🔄 WebSocket Movimientos:', wsMovement ? `Conectado (${wsMovement.readyState})` : 'No iniciado');
+    console.log('🚫 WebSocket Obstáculos:', wsObstacle ? `Conectado (${wsObstacle.readyState})` : 'No iniciado');
     console.log('📋 Dispositivo:', DEVICE_NAME);
     
-    // Test de conexión básica
-    if (socket && socket.connected) {
-        console.log('✅ WebSocket parece conectado');
-        socket.emit('ping');
-    } else {
-        console.log('❌ WebSocket NO conectado');
+    if (wsMovement && wsMovement.readyState === WebSocket.OPEN) {
+        console.log('✅ WebSocket de movimientos funcionando');
+    }
+    if (wsObstacle && wsObstacle.readyState === WebSocket.OPEN) {
+        console.log('✅ WebSocket de obstáculos funcionando');
     }
 }
 
-// Llamar desde la consola del navegador para diagnosticar
-window.diagnoseWS = diagnoseWebSocket;
-
-// Función de prueba manual de WebSocket
 function testWebSocketConnection() {
-    console.log('🧪 TEST MANUAL DE WEBSOCKET');
-    console.log('1. URL WebSocket:', WS_BASE_URL);
-    console.log('2. Socket existe:', !!socket);
-    console.log('3. Socket conectado:', socket?.connected);
-    console.log('4. Socket ID:', socket?.id);
-    console.log('5. Dispositivo:', DEVICE_NAME);
+    console.log('🧪 TEST MANUAL DE WEBSOCKETS');
+    console.log('1. URL WebSocket Base:', WS_BASE_URL);
+    console.log('2. WebSocket Movimientos:', wsMovement ? `Estado: ${wsMovement.readyState}` : 'No existe');
+    console.log('3. WebSocket Obstáculos:', wsObstacle ? `Estado: ${wsObstacle.readyState}` : 'No existe');
+    console.log('4. Dispositivo:', DEVICE_NAME);
     
-    if (socket && socket.connected) {
-        console.log('✅ Socket conectado - Enviando ping...');
-        socket.emit('ping');
-        
-        console.log('✅ Solicitando datos inmediatos...');
-        socket.emit('get_immediate_movement', { device_name: DEVICE_NAME });
-        socket.emit('get_immediate_obstacle', { device_name: DEVICE_NAME });
-        
-        showAlert('WebSocket funcionando correctamente', 'success');
+    if (wsMovement && wsMovement.readyState === WebSocket.OPEN) {
+        console.log('✅ WebSocket de movimientos CONECTADO');
+        showAlert('WebSocket de movimientos funcionando correctamente', 'success');
     } else {
-        console.log('❌ Socket NO conectado - Reiniciando conexión...');
-        connectWebSocket();
+        console.log('❌ WebSocket de movimientos NO CONECTADO - Reiniciando...');
+        connectMovementWebSocket();
+    }
+    
+    if (wsObstacle && wsObstacle.readyState === WebSocket.OPEN) {
+        console.log('✅ WebSocket de obstáculos CONECTADO');
+        showAlert('WebSocket de obstáculos funcionando correctamente', 'success');
+    } else {
+        console.log('❌ WebSocket de obstáculos NO CONECTADO - Reiniciando...');
+        connectObstacleWebSocket();
     }
 }
 
-// Hacerla disponible globalmente para pruebas
+// Función para debug de estructura de datos WebSocket
+function debugWebSocketData(eventData, type) {
+    console.log(`🔍 DEBUG ${type} WebSocket Data Structure:`);
+    console.log('Tipo:', typeof eventData);
+    console.log('Keys:', Object.keys(eventData));
+    console.log('Valores:', eventData);
+    
+    if (eventData.data) {
+        console.log('📦 eventData.data existe. Keys:', Object.keys(eventData.data));
+    }
+    if (eventData.movement) {
+        console.log('📦 eventData.movement existe. Keys:', Object.keys(eventData.movement));
+    }
+    if (eventData.obstacle) {
+        console.log('📦 eventData.obstacle existe. Keys:', Object.keys(eventData.obstacle));
+    }
+}
+
+// --- Funciones mejoradas para la UI de secuencias ---
+
+function actualizarUIEjecucionSecuencia() {
+    const estadoSecuencia = document.getElementById('estadoSecuencia');
+    const infoPasoActual = document.getElementById('infoPasoActual');
+    const btnReanudar = document.getElementById('btnReanudarSecuencia');
+    const btnPausar = document.getElementById('btnPausarSecuencia');
+    const btnDetener = document.getElementById('btnDetenerSecuencia');
+
+    if (ejecucionSecuencia.activa) {
+        estadoSecuencia.style.display = 'block';
+        
+        if (ejecucionSecuencia.pausada) {
+            estadoSecuencia.style.backgroundColor = 'rgba(255, 193, 7, 0.2)';
+            btnReanudar.disabled = false;
+            btnPausar.disabled = true;
+            btnDetener.disabled = false;
+        } else {
+            estadoSecuencia.style.backgroundColor = 'rgba(13, 110, 253, 0.2)';
+            btnReanudar.disabled = true;
+            btnPausar.disabled = false;
+            btnDetener.disabled = false;
+        }
+        
+        if (ejecucionSecuencia.pasoActual > 0 && ejecucionSecuencia.pasoActual <= ejecucionSecuencia.totalPasos) {
+            infoPasoActual.classList.remove('hidden');
+        }
+    } else {
+        estadoSecuencia.style.display = 'block';
+        estadoSecuencia.style.backgroundColor = 'var(--bs-secondary)';
+        infoPasoActual.classList.add('hidden');
+        btnReanudar.disabled = true;
+        btnPausar.disabled = true;
+        btnDetener.disabled = true;
+    }
+}
+
+function mostrarInformacionSecuencia() {
+    const secuenciaIdActual = document.getElementById('secuenciaIdActual');
+    const totalPasosSecuencia = document.getElementById('totalPasosSecuencia');
+    
+    if (secuenciaIdActual && totalPasosSecuencia) {
+        secuenciaIdActual.textContent = ejecucionSecuencia.secuenciaId || '-';
+        totalPasosSecuencia.textContent = ejecucionSecuencia.totalPasos || '-';
+    }
+    
+    actualizarUIEjecucionSecuencia();
+}
+
+function mostrarPasoActual(numeroPaso, paso) {
+    const pasoActualSecuencia = document.getElementById('pasoActualSecuencia');
+    const operacionActual = document.getElementById('operacionActual');
+    const duracionActual = document.getElementById('duracionActual');
+    
+    if (pasoActualSecuencia) {
+        pasoActualSecuencia.textContent = `${numeroPaso}/${ejecucionSecuencia.totalPasos}`;
+    }
+    
+    if (operacionActual && duracionActual) {
+        let operacionTexto = paso.operacion_texto;
+        if (!operacionTexto && paso.operacion && OPERACION_MAP) {
+            operacionTexto = Object.keys(OPERACION_MAP).find(key => OPERACION_MAP[key] === paso.operacion);
+        }
+        if (!operacionTexto) {
+            operacionTexto = `Operación ${paso.operacion || 'N/A'}`;
+        }
+        
+        operacionActual.textContent = operacionTexto;
+        duracionActual.textContent = `${Math.round(paso.duracion_ms)}ms`;
+    }
+}
+
+function actualizarProgreso(pasoActual, tiempoRestante) {
+    const barraProgreso = document.getElementById('barraProgresoSecuencia');
+    const progresoTexto = document.getElementById('progresoTexto');
+    const progresoDetalle = document.getElementById('progresoDetalle');
+    const tiempoRestanteSecuencia = document.getElementById('tiempoRestanteSecuencia');
+    
+    if (!barraProgreso || !progresoTexto || !progresoDetalle || !tiempoRestanteSecuencia) {
+        console.error('❌ Elementos de progreso no encontrados');
+        return;
+    }
+    
+    const progreso = (pasoActual / ejecucionSecuencia.totalPasos) * 100;
+    barraProgreso.style.width = `${progreso}%`;
+    progresoTexto.textContent = `${Math.round(progreso)}%`;
+    tiempoRestanteSecuencia.textContent = tiempoRestante;
+    
+    // Actualizar detalles del progreso
+    progresoDetalle.textContent = `Paso ${pasoActual} de ${ejecucionSecuencia.totalPasos} • ${tiempoRestante}`;
+    
+    // Cambiar color de la barra según el progreso
+    if (progreso < 50) {
+        barraProgreso.style.backgroundColor = '#0d6efd'; // Azul
+    } else if (progreso < 100) {
+        barraProgreso.style.backgroundColor = '#198754'; // Verde
+    } else {
+        barraProgreso.style.backgroundColor = '#198754'; // Verde completo
+    }
+    
+    console.log(`📈 Progreso actualizado: ${Math.round(progreso)}% - Tiempo restante: ${tiempoRestante}`);
+}
+
+function agregarLogEjecucion(mensaje) {
+    const logEjecucion = document.getElementById('logEjecucionSecuencia');
+    const ahora = new Date();
+    const timestamp = ahora.toLocaleTimeString() + '.' + ahora.getMilliseconds().toString().padStart(3, '0');
+    
+    // Si es el primer mensaje, limpiar el placeholder
+    if (logEjecucion.innerHTML.includes('No hay secuencia en ejecución')) {
+        logEjecucion.innerHTML = '';
+    }
+    
+    const logEntry = document.createElement('div');
+    logEntry.className = 'border-bottom border-secondary py-2 small';
+    
+    // Determinar el icono y color según el tipo de mensaje
+    let icono = 'bi-info-circle';
+    let color = 'text-light';
+    
+    if (mensaje.includes('✅') || mensaje.includes('COMPLETADO')) {
+        icono = 'bi-check-circle-fill';
+        color = 'text-success';
+    } else if (mensaje.includes('▶️') || mensaje.includes('INICIADA')) {
+        icono = 'bi-play-circle-fill';
+        color = 'text-primary';
+    } else if (mensaje.includes('❌') || mensaje.includes('ERROR')) {
+        icono = 'bi-exclamation-circle-fill';
+        color = 'text-danger';
+    } else if (mensaje.includes('⏸️') || mensaje.includes('PAUSADA')) {
+        icono = 'bi-pause-circle-fill';
+        color = 'text-warning';
+    } else if (mensaje.includes('🚫') || mensaje.includes('INTERRUMPIDA')) {
+        icono = 'bi-slash-circle-fill';
+        color = 'text-danger';
+    } else if (mensaje.includes('🔄') || mensaje.includes('REANUDANDO')) {
+        icono = 'bi-arrow-repeat';
+        color = 'text-info';
+    }
+    
+    logEntry.innerHTML = `
+        <div class="d-flex align-items-start">
+            <i class="bi ${icono} ${color} me-2 mt-1"></i>
+            <div class="flex-grow-1">
+                <span class="text-light">[${timestamp}]</span> 
+                <span class="${color}">${mensaje}</span>
+            </div>
+        </div>
+    `;
+    
+    logEjecucion.prepend(logEntry);
+    
+    // Limitar a 20 entradas máximo
+    const entries = logEjecucion.querySelectorAll('div');
+    if (entries.length > 20) {
+        entries[entries.length - 1].remove();
+    }
+    
+    // Efecto visual de nueva entrada
+    logEntry.style.animation = 'fadeIn 0.5s ease-in';
+}
+
+// Funciones de control de secuencia
+function pausarSecuencia() {
+    if (!ejecucionSecuencia.activa || ejecucionSecuencia.pausada) return;
+    
+    ejecucionSecuencia.pausada = true;
+    ejecucionSecuencia.timeoutPasos.forEach(timeout => clearTimeout(timeout));
+    ejecucionSecuencia.timeoutPasos = [];
+    
+    agregarLogEjecucion('⏸️ SECUENCIA PAUSADA');
+    showAlert('Secuencia pausada', 'warning');
+    actualizarUIEjecucionSecuencia();
+}
+
+function reanudarSecuencia() {
+    if (!ejecucionSecuencia.activa || !ejecucionSecuencia.pausada) return;
+    
+    ejecucionSecuencia.pausada = false;
+    ejecucionSecuencia.inicioEjecucion = new Date();
+    
+    agregarLogEjecucion('🔄 SECUENCIA REANUDADA');
+    showAlert('Secuencia reanudada', 'success');
+    actualizarUIEjecucionSecuencia();
+    
+    // Continuar con el siguiente paso
+    ejecutarSiguientePaso();
+}
+
+function detenerSecuencia() {
+    if (!ejecucionSecuencia.activa) return;
+    
+    ejecucionSecuencia.timeoutPasos.forEach(timeout => clearTimeout(timeout));
+    ejecucionSecuencia.timeoutPasos = [];
+    
+    agregarLogEjecucion('⏹️ SECUENCIA DETENIDA MANUALMENTE');
+    showAlert('Secuencia detenida', 'info');
+    
+    ejecucionSecuencia.activa = false;
+    ejecucionSecuencia.pausada = false;
+    
+    // Enviar comando de detener al carrito
+    sendMovement(3);
+    
+    actualizarUIEjecucionSecuencia();
+    limpiarEjecucionSecuencia();
+}
+
+function verificarElementosDemo() {
+    const elementos = [
+        'nPasos', 'minMs', 'maxMs', 'excluirDetener'
+    ];
+    
+    let todosExisten = true;
+    
+    elementos.forEach(id => {
+        const elemento = document.getElementById(id);
+        console.log(`Elemento ${id}:`, elemento ? 'ENCONTRADO' : 'NO ENCONTRADO');
+        if (!elemento) {
+            todosExisten = false;
+        }
+    });
+    
+    return todosExisten;
+}
+
+// Llama a esta función en la consola del navegador para debuggear
+window.verificarElementosDemo = verificarElementosDemo;
+// Llamar esta función en los message handlers temporalmente para debug
+// En wsMovement.onmessage, después de JSON.parse:
+// debugWebSocketData(data, 'MOVEMENT');
+
+// En wsObstacle.onmessage, después de JSON.parse:  
+// debugWebSocketData(data, 'OBSTACLE');
+
+// Hacer disponibles para pruebas
+window.diagnoseWS = diagnoseWebSockets;
 window.testWS = testWebSocketConnection;
-window.connectWS = connectWebSocket;
+window.connectWS = connectWebSockets;
