@@ -9,11 +9,8 @@ console.log(`🔗 WebSocket: ${WS_BASE_URL}`);
 
 let DEVICE_NAME = document.getElementById('deviceInput').value || 'carrito-alpha';
 
-// WebSockets nativos
-let wsMovement = null;
-let wsObstacle = null;
-let movementReconnectAttempts = 0;
-let obstacleReconnectAttempts = 0;
+let webSocket = null;
+let reconnectAttempts = 0;
 const MAX_RECONNECT_ATTEMPTS = 10;
 const RECONNECT_DELAY = 3000;
 
@@ -71,124 +68,114 @@ const OBSTACULO_MAP = {
     'Retrocede': 5
 };
 
-// --- 2. WebSockets Nativos ---
-
-function connectWebSockets() {
-    connectMovementWebSocket();
-    connectObstacleWebSocket();
-}
-
-function connectMovementWebSocket() {
-    const url = `${WS_BASE_URL}/ws/movement/${DEVICE_NAME}`;
+// --- 2. WebSocket Nativo ---
+// --- 2. WebSocket Único con Múltiples Canales ---
+function connectWebSocket() {
+    const url = `${WS_BASE_URL}/ws`;
     
     try {
-        wsMovement = new WebSocket(url);
+        webSocket = new WebSocket(url);
         
-        wsMovement.onopen = function(event) {
-            console.log('✅ WebSocket de Movimientos CONECTADO');
-            movementReconnectAttempts = 0;
+        webSocket.onopen = function(event) {
+            console.log('✅ WebSocket Único CONECTADO');
+            reconnectAttempts = 0;
             updateWSStatus('movement', 'connected');
-            logToWS('MOV', 'Conectado al servidor de movimientos');
-            showAlert('WebSocket de movimientos conectado', 'success');
-            
-            // Cargar datos iniciales cuando se conecta
-            loadMovementLogs();
-        };
-        
-        wsMovement.onclose = function(event) {
-            console.log('❌ WebSocket de Movimientos CERRADO:', event.code, event.reason);
-            updateWSStatus('movement', 'disconnected');
-            logToWS('MOV', `Conexión cerrada: ${event.code} - ${event.reason}`);
-            
-            if (movementReconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-                movementReconnectAttempts++;
-                console.log(`🔄 Reintentando conexión de movimientos (${movementReconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`);
-                setTimeout(connectMovementWebSocket, RECONNECT_DELAY);
-            }
-        };
-        
-        wsMovement.onerror = function(error) {
-            console.error('❌ Error en WebSocket de Movimientos:', error);
-            updateWSStatus('movement', 'error');
-            logToWS('MOV', 'Error de conexión');
-        };
-        
-        wsMovement.onmessage = function(event) {
-    try {
-        const data = JSON.parse(event.data);
-        console.log('📡 Mensaje recibido de movimiento:', data);
-        logToWS('MOV', `Datos: ${data.operacion_texto || 'Actualización'}`);
-        
-        // Esta línea debe llamar handleMovementEvent que ahora actualiza la UI
-        handleMovementEvent(data);
-        
-    } catch (error) {
-        console.error('❌ Error parseando mensaje de movimiento:', error);
-        logToWS('MOV', 'Error parseando mensaje');
-    }
-};
-        
-    } catch (error) {
-        console.error('❌ Error creando WebSocket de movimientos:', error);
-        updateWSStatus('movement', 'error');
-    }
-}
-
-function connectObstacleWebSocket() {
-    const url = `${WS_BASE_URL}/ws/obstacle/${DEVICE_NAME}`;
-    
-    try {
-        wsObstacle = new WebSocket(url);
-        
-        wsObstacle.onopen = function(event) {
-            console.log('✅ WebSocket de Obstáculos CONECTADO');
-            obstacleReconnectAttempts = 0;
             updateWSStatus('obstacle', 'connected');
-            logToWS('OBS', 'Conectado al servidor de obstáculos');
-            showAlert('WebSocket de obstáculos conectado', 'success');
+            logToWS('CONN', 'Conectado al servidor WebSocket único');
+            showAlert('WebSocket único conectado', 'success');
             
-            // Cargar datos iniciales cuando se conecta
+            // Suscribirse a ambos canales
+            subscribeToChannel('movement');
+            subscribeToChannel('obstacle');
+            
+            // Cargar datos iniciales
+            loadMovementLogs();
             loadObstacleLogs();
         };
         
-        wsObstacle.onclose = function(event) {
-            console.log('❌ WebSocket de Obstáculos CERRADO:', event.code, event.reason);
+        webSocket.onclose = function(event) {
+            console.log('❌ WebSocket Único CERRADO:', event.code, event.reason);
+            updateWSStatus('movement', 'disconnected');
             updateWSStatus('obstacle', 'disconnected');
-            logToWS('OBS', `Conexión cerrada: ${event.code} - ${event.reason}`);
+            logToWS('CONN', `Conexión cerrada: ${event.code} - ${event.reason}`);
             
-            if (obstacleReconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
-                obstacleReconnectAttempts++;
-                console.log(`🔄 Reintentando conexión de obstáculos (${obstacleReconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`);
-                setTimeout(connectObstacleWebSocket, RECONNECT_DELAY);
+            if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
+                reconnectAttempts++;
+                console.log(`🔄 Reintentando conexión (${reconnectAttempts}/${MAX_RECONNECT_ATTEMPTS})...`);
+                setTimeout(connectWebSocket, RECONNECT_DELAY);
             }
         };
         
-        wsObstacle.onerror = function(error) {
-            console.error('❌ Error en WebSocket de Obstáculos:', error);
+        webSocket.onerror = function(error) {
+            console.error('❌ Error en WebSocket Único:', error);
+            updateWSStatus('movement', 'error');
             updateWSStatus('obstacle', 'error');
-            logToWS('OBS', 'Error de conexión');
+            logToWS('CONN', 'Error de conexión');
         };
         
-        wsObstacle.onmessage = function(event) {
+        webSocket.onmessage = function(event) {
     try {
         const data = JSON.parse(event.data);
-        console.log('📡 Mensaje recibido de obstáculo:', data);
-        logToWS('OBS', `Datos: ${data.obstaculo_texto || 'Actualización'}`);
+        console.log('📡 Mensaje recibido del canal:', data.channel, 'Tipo:', data.type);
         
-        // Esta línea debe llamar handleObstacleEvent que ahora actualiza la UI
-        handleObstacleEvent(data);
+        // DEBUG DETALLADO TEMPORAL
+        console.log('🔍 Estructura completa del mensaje:', {
+            channel: data.channel,
+            type: data.type,
+            device_name: data.device_name,
+            data_keys: data.data ? Object.keys(data.data) : 'No data'
+        });
+        
+        // ENRUTAR MENSAJES SEGÚN EL CANAL
+        if (data.channel === 'movement') {
+            logToWS('MOV', `Tipo: ${data.type}`);
+            handleMovementEvent(data);
+        } else if (data.channel === 'obstacle') {
+            logToWS('OBS', `Tipo: ${data.type}`);
+            handleObstacleEvent(data);
+        } else if (data.type === 'subscription_confirmed') {
+            logToWS('SUB', `Suscripción confirmada: ${data.channel}`);
+            console.log(`✅ Suscrito al canal: ${data.channel}`);
+        } else if (data.type === 'latest') {
+            console.log(`📥 Mensaje 'latest' recibido para canal: ${data.channel}`);
+            // Los mensajes 'latest' también deben ser procesados por sus handlers
+            if (data.channel === 'movement') {
+                handleMovementEvent(data);
+            } else if (data.channel === 'obstacle') {
+                handleObstacleEvent(data);
+            }
+        } else {
+            console.log('❓ Mensaje no manejado:', data);
+            logToWS('UNK', `Mensaje no manejado: ${data.channel} - ${data.type}`);
+        }
         
     } catch (error) {
-        console.error('❌ Error parseando mensaje de obstáculo:', error);
-        logToWS('OBS', 'Error parseando mensaje');
+        console.error('❌ Error parseando mensaje WebSocket:', error);
+        console.error('📄 Contenido del mensaje que causó error:', event.data);
+        logToWS('ERR', `Error parseando: ${error.message}`);
     }
 };
         
     } catch (error) {
-        console.error('❌ Error creando WebSocket de obstáculos:', error);
+        console.error('❌ Error creando WebSocket único:', error);
+        updateWSStatus('movement', 'error');
         updateWSStatus('obstacle', 'error');
     }
 }
+
+// Función para suscribirse a un canal específico
+function subscribeToChannel(channel) {
+    if (webSocket && webSocket.readyState === WebSocket.OPEN) {
+        const subscribeMessage = {
+            action: "subscribe",
+            channel: channel,
+            device_name: DEVICE_NAME
+        };
+        webSocket.send(JSON.stringify(subscribeMessage));
+        console.log(`📨 Suscribiéndose al canal: ${channel}`);
+    }
+}
+
 
 function updateWSStatus(type, status) {
     const element = document.getElementById(`ws${type.charAt(0).toUpperCase() + type.slice(1)}Status`);
@@ -214,13 +201,9 @@ function updateWSStatus(type, status) {
 }
 
 function disconnectWebSockets() {
-    if (wsMovement) {
-        wsMovement.close();
-        wsMovement = null;
-    }
-    if (wsObstacle) {
-        wsObstacle.close();
-        wsObstacle = null;
+     if (webSocket) {
+        webSocket.close();
+        webSocket = null;
     }
 }
 
@@ -358,26 +341,23 @@ let movementCache = [];
 let obstacleCache = [];
 
 function handleMovementEvent(eventData) {
-    if (!eventData) return;
-    
-    console.log('🔄 Procesando evento de movimiento:', eventData);
-    
-    // EXTRAER LOS DATOS REALES - manejar diferentes estructuras
-    let movementData = eventData;
-    
-    // Si viene con estructura {type: 'movement_last', data: {...}}
-    if (eventData.data && (eventData.type === 'movement_last' || eventData.type === 'movement_update')) {
-        movementData = eventData.data;
-        console.log('📦 Extrayendo datos de movimiento del wrapper:', movementData);
-    }
-    // Si viene con estructura {movement: {...}}
-    else if (eventData.movement) {
-        movementData = eventData.movement;
-        console.log('📦 Extrayendo datos de movimiento de propiedad movement:', movementData);
+    // SOLO MOVIMIENTOS - estructura: {type, channel, device_name, data: {...}}
+    if (!eventData || eventData.channel !== 'movement' || !eventData.data) {
+        console.log('❌ Evento de movimiento ignorado - canal incorrecto o sin datos');
+        return;
     }
     
-    if (!movementData || !movementData.id) {
-        console.log('❌ Datos de movimiento inválidos:', movementData);
+    console.log('🔄 Procesando evento de MOVIMIENTO:', eventData.data);
+    const movementData = eventData.data;
+    
+    // Validar que sea realmente un movimiento
+    if (!movementData.operacion_clave && !movementData.operacion_texto) {
+        console.log('❌ No es un movimiento válido (sin operacion_clave u operacion_texto):', movementData);
+        return;
+    }
+    
+    if (!movementData.id) {
+        console.log('❌ Datos de movimiento inválidos (sin ID):', movementData);
         return;
     }
     
@@ -394,33 +374,27 @@ function handleMovementEvent(eventData) {
         movementCache = movementCache.slice(0, 50);
     }
     
-    console.log('📊 Cache de movimientos actualizado. Total:', movementCache.length);
-    
-    // ACTUALIZAR UI INMEDIATAMENTE
+    console.log('📊 Cache de MOVIMIENTOS actualizado. Total:', movementCache.length);
     updateMovementDisplay();
 }
-
 function handleObstacleEvent(eventData) {
-    if (!eventData) return;
-    
-    console.log('🔄 Procesando evento de obstáculo:', eventData);
-    
-    // EXTRAER LOS DATOS REALES - manejar diferentes estructuras
-    let obstacleData = eventData;
-    
-    // Si viene con estructura {type: 'obstacle_last', data: {...}}
-    if (eventData.data && (eventData.type === 'obstacle_last' || eventData.type === 'obstacle_update')) {
-        obstacleData = eventData.data;
-        console.log('📦 Extrayendo datos de obstáculo del wrapper:', obstacleData);
-    }
-    // Si viene con estructura {obstacle: {...}}
-    else if (eventData.obstacle) {
-        obstacleData = eventData.obstacle;
-        console.log('📦 Extrayendo datos de obstáculo de propiedad obstacle:', obstacleData);
+    // SOLO OBSTÁCULOS - estructura: {type, channel, device_name, data: {...}}
+    if (!eventData || eventData.channel !== 'obstacle' || !eventData.data) {
+        console.log('❌ Evento de obstáculo ignorado - canal incorrecto o sin datos');
+        return;
     }
     
-    if (!obstacleData || !obstacleData.id) {
-        console.log('❌ Datos de obstáculo inválidos:', obstacleData);
+    console.log('🔄 Procesando evento de OBSTÁCULO:', eventData.data);
+    const obstacleData = eventData.data;
+    
+    // Validar que sea realmente un obstáculo
+    if (!obstacleData.obstaculo_clave && !obstacleData.obstaculo_texto) {
+        console.log('❌ No es un obstáculo válido (sin obstaculo_clave u obstaculo_texto):', obstacleData);
+        return;
+    }
+    
+    if (!obstacleData.id) {
+        console.log('❌ Datos de obstáculo inválidos (sin ID):', obstacleData);
         return;
     }
     
@@ -437,9 +411,7 @@ function handleObstacleEvent(eventData) {
         obstacleCache = obstacleCache.slice(0, 50);
     }
     
-    console.log('📊 Cache de obstáculos actualizado. Total:', obstacleCache.length);
-    
-    // ACTUALIZAR UI INMEDIATAMENTE
+    console.log('📊 Cache de OBSTÁCULOS actualizado. Total:', obstacleCache.length);
     updateObstacleDisplay();
 }
 
@@ -679,13 +651,17 @@ function updateDeviceName(newName) {
         
         showAlert(`Cambiando dispositivo de ${oldName} a ${DEVICE_NAME}. Reconectando WS...`, 'info');
         
+        // LIMPIAR CACHES COMPLETAMENTE
         movementCache = [];
         obstacleCache = [];
         
         clearMonitoringDisplays();
         
+        // DESCONECTAR Y RECONECTAR
         disconnectWebSockets();
-        setTimeout(() => connectWebSockets(), 1000);
+        setTimeout(() => {
+            connectWebSocket(); // ← CONECTAR NUEVAMENTE
+        }, 1000);
     }
 }
 
@@ -777,10 +753,27 @@ function formatLogData(data, isList = false) {
     list.forEach(item => {
         if (!item) return;
         
-        const operation = item.operacion_texto || item.sugerencia_texto || item.obstaculo_texto || item.operacion || 'N/A';
-        const type = item.operacion_texto || item.operacion ? 'MOVIMIENTO' : 'OBSTÁCULO';
-        const icon = item.operacion_texto || item.operacion ? 'bi-arrow-right-circle' : 'bi-cone-striped';
-        const textColor = item.operacion_texto || item.operacion ? 'text-info' : 'text-warning';
+        // DIFERENCIAR CLARAMENTE ENTRE MOVIMIENTOS Y OBSTÁCULOS
+        let operation, type, icon, textColor;
+        
+        // ES MOVIMIENTO si tiene operacion_clave u operacion_texto
+        if (item.operacion_clave !== undefined || item.operacion_texto) {
+            operation = item.operacion_texto || `Operación ${item.operacion_clave}` || 'N/A';
+            type = 'MOVIMIENTO';
+            icon = 'bi-arrow-right-circle';
+            textColor = 'text-info';
+        } 
+        // ES OBSTÁCULO si tiene obstaculo_clave u obstaculo_texto
+        else if (item.obstaculo_clave !== undefined || item.obstaculo_texto) {
+            operation = item.obstaculo_texto || `Obstáculo ${item.obstaculo_clave}` || 'N/A';
+            type = 'OBSTÁCULO';
+            icon = 'bi-cone-striped';
+            textColor = 'text-warning';
+        } else {
+            // Tipo desconocido - no mostrar
+            console.log('❓ Elemento desconocido en formatLogData:', item);
+            return;
+        }
         
         const timeDetail = item.event_at ? 
             `Hace ${getTimeAgo(new Date(item.event_at))} (${new Date(item.event_at).toLocaleTimeString()})` : 
@@ -790,12 +783,15 @@ function formatLogData(data, isList = false) {
 
         const locationDetail = (item.ciudad && item.pais) ? 
             `${item.ciudad}, ${item.pais}` : 
-            (item.ip ? `IP: ${item.ip}` : '');
+            (item.ip_cliente ? `IP: ${item.ip_cliente}` : '');
 
-        // MOSTRAR VELOCIDAD SI EXISTE
-        const speedDetail = item.speed ? 
-            `<br><i class="bi bi-speedometer2 me-1"></i>Velocidad: ${item.speed}` : 
-            '';
+        // MOSTRAR VELOCIDAD SOLO PARA MOVIMIENTOS
+        const speedDetail = (item.speed !== null && item.speed !== undefined && type === 'MOVIMIENTO') ? 
+            `<br><i class="bi bi-speedometer2 me-1"></i>Velocidad: ${item.speed}` : '';
+
+        // MOSTRAR SUGERENCIA SOLO PARA OBSTÁCULOS
+        const suggestionDetail = (item.sugerencia_texto && type === 'OBSTÁCULO') ? 
+            `<br><i class="bi bi-lightbulb me-1"></i>Sugerencia: ${item.sugerencia_texto}` : '';
 
         html += `<div class="py-2 border-bottom border-secondary">
             <p class="small fw-bold ${textColor} mb-1">
@@ -804,7 +800,9 @@ function formatLogData(data, isList = false) {
             <p class="small text-secondary mb-0 ps-3">
                 <i class="bi bi-clock me-1"></i>${timeDetail}
                 ${speedDetail}
-                ${item.lat && item.lon ? `<br><i class="bi bi-pin-map me-1"></i>${item.lat.toFixed(4)}, ${item.lon.toFixed(4)}` : ''}
+                ${suggestionDetail}
+                ${item.latitud && item.longitud ? `<br><i class="bi bi-pin-map me-1"></i>${item.latitud.toFixed(4)}, ${item.longitud.toFixed(4)}` : ''}
+                ${locationDetail ? `<br><i class="bi bi-geo-alt me-1"></i>${locationDetail}` : ''}
             </p>
             ${item.id ? `<p class="small text-muted mb-0 ps-3">ID: ${item.id}</p>` : ''}
         </div>`;
@@ -1427,7 +1425,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Iniciar conexiones WebSocket
     console.log('🔄 Iniciando conexiones WebSocket nativas...');
-    connectWebSockets();
+    connectWebSocket(); // ← NUEVO
     
     // Cargar datos después de 3 segundos
     setTimeout(() => {
@@ -1440,17 +1438,13 @@ document.addEventListener('DOMContentLoaded', function() {
 
 // Funciones de diagnóstico
 function diagnoseWebSockets() {
-    console.log('🔍 DIAGNÓSTICO WEBSOCKETS:');
-    console.log('📡 URL WebSocket Base:', WS_BASE_URL);
-    console.log('🔄 WebSocket Movimientos:', wsMovement ? `Conectado (${wsMovement.readyState})` : 'No iniciado');
-    console.log('🚫 WebSocket Obstáculos:', wsObstacle ? `Conectado (${wsObstacle.readyState})` : 'No iniciado');
+    console.log('🔍 DIAGNÓSTICO WEBSOCKET ÚNICO:');
+    console.log('📡 URL WebSocket:', `${WS_BASE_URL}/ws`);
+    console.log('🔄 WebSocket Único:', webSocket ? `Conectado (${webSocket.readyState})` : 'No iniciado');
     console.log('📋 Dispositivo:', DEVICE_NAME);
     
-    if (wsMovement && wsMovement.readyState === WebSocket.OPEN) {
-        console.log('✅ WebSocket de movimientos funcionando');
-    }
-    if (wsObstacle && wsObstacle.readyState === WebSocket.OPEN) {
-        console.log('✅ WebSocket de obstáculos funcionando');
+    if (webSocket && webSocket.readyState === WebSocket.OPEN) {
+        console.log('✅ WebSocket único funcionando');
     }
 }
 
@@ -1720,6 +1714,60 @@ function verificarElementosDemo() {
     });
     
     return todosExisten;
+}
+
+async function cancelarSecuencia() {
+    try {
+        const response = await fetch(`${API_BASE_URL}/demo/${DEVICE_NAME}/cancel`, {
+            method: 'POST',
+            headers: { 
+                'Content-Type': 'application/json',
+                'Accept': 'application/json'
+            }
+        });
+
+        if (!response.ok) {
+            throw new Error('Error al cancelar secuencia');
+        }
+
+        const result = await response.json();
+        console.log('✅ Secuencia cancelada:', result);
+        showAlert('Secuencia cancelada exitosamente', 'success');
+        
+        // Limpiar estado local de ejecución
+        detenerEjecucionSecuencia();
+        
+        return result;
+
+    } catch (error) {
+        console.error('❌ Error cancelando secuencia:', error);
+        showAlert(`Error al cancelar secuencia: ${error.message}`, 'danger');
+        return null;
+    }
+}
+
+// Modificar la función detenerSecuencia para usar la API de cancel
+function detenerSecuencia() {
+    if (!ejecucionSecuencia.activa) return;
+    
+    // Llamar a la API de cancel
+    cancelarSecuencia().then(() => {
+        // Limpiar estado local aunque falle la API
+        ejecucionSecuencia.timeoutPasos.forEach(timeout => clearTimeout(timeout));
+        ejecucionSecuencia.timeoutPasos = [];
+        
+        agregarLogEjecucion('⏹️ SECUENCIA DETENIDA MANUALMENTE');
+        showAlert('Secuencia detenida', 'info');
+        
+        ejecucionSecuencia.activa = false;
+        ejecucionSecuencia.pausada = false;
+        
+        // Enviar comando de detener al carrito
+        sendMovement(3);
+        
+        actualizarUIEjecucionSecuencia();
+        limpiarEjecucionSecuencia();
+    });
 }
 
 // Llama a esta función en la consola del navegador para debuggear
