@@ -132,3 +132,6 @@ body {
 .log-box-custom::-webkit-scrollbar-thumb:hover {
     background: #718096;
 }
+.not-here{
+    z-index: -50000;
+}
