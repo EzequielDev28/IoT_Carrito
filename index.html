@@ -18,9 +18,9 @@
             <h1 class="me-3"><i class="bi bi-cpu-fill me-2"></i>IoT Center</h1>
             <div class="d-flex align-items-center bg-dark px-2 py-1 rounded border border-secondary">
                 <span class="live-indicator" id="wsStatusDot"></span>
-                <span class="text-xs text-muted me-2">WS MOV:</span>
+                <span class="text-xs text-muted">WS MOV:</span>
                 <span id="wsMovementStatus" class="text-xs fw-bold text-secondary me-3">...</span>
-                <span class="text-xs text-muted me-2">WS OBS:</span>
+                <span class="text-xs text-muted">WS OBS:</span>
                 <span id="wsObstacleStatus" class="text-xs fw-bold text-secondary">...</span>
             </div>
         </div>
@@ -35,7 +35,7 @@
     <div class="dashboard-main">
 
         <section class="panel-control">
-            
+
             <div class="control-layout">
                 <div class="col-movement">
                     <div class="card-custom h-100">
@@ -141,6 +141,7 @@
                             <hr class="border-secondary my-1">
                             
                             <button class="btn btn-sm btn-outline-secondary w-100 mb-1" onclick="loadLast20Demos()">Cargar Historial</button>
+                            
                             <div id="demoList" class="log-container" style="flex: 1; max-height: 150px;"></div>
                         </div>
                     </div>
@@ -177,15 +178,7 @@
             <div class="card-custom" style="flex: 1; min-height: 0;">
                 <div class="card-header-custom text-primary d-flex justify-content-between">
                     <span>Ejecución en Tiempo Real</span>
-                    <!--
-                    <div class="d-flex gap-1">
-                        <button id="btnReanudarSecuencia" class="btn btn-xs btn-success py-0 px-2" onclick="reanudarSecuencia()" disabled><i class="bi bi-play-fill"></i></button>
-                        <button id="btnPausarSecuencia" class="btn btn-xs btn-warning py-0 px-2" onclick="pausarSecuencia()" disabled><i class="bi bi-pause-fill"></i></button>
-                        <button id="btnDetenerSecuencia" class="btn btn-xs btn-danger py-0 px-2" onclick="detenerSecuencia()" disabled><i class="bi bi-stop-fill"></i></button>
                     </div>
-                    -->
-
-                </div>
                 
                 <div class="card-body-custom p-3 gap-2">
                     <div id="estadoSecuencia" class="d-flex justify-content-between bg-dark border border-secondary rounded p-2 text-xs">

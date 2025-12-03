@@ -983,23 +983,49 @@ async function loadLast20Demos() {
     const demoListDiv = document.getElementById('demoList');
     demoListDiv.innerHTML = '<p class="text-info small">Cargando demos...</p>';
     
-    const demos = await fetchData(`/demo/${DEVICE_NAME}/last20`);
+    try {
+        const demos = await fetchData(`/demo/${DEVICE_NAME}/last20`);
     
-    if (demos && Array.isArray(demos) && demos.length > 0) {
-        demoListDiv.innerHTML = '';
-        demos.forEach(demo => {
-            const item = document.createElement('div');
-            item.className = 'demo-item border-bottom border-secondary py-2 cursor-pointer';
-            item.setAttribute('data-secuencia-id', demo.id);
-            item.innerHTML = `
-                <span class="fw-bold text-info">ID: ${demo.id}</span> | Pasos: ${demo.n_pasos}<br>
-                <span class="text-secondary small">Creada: ${new Date(demo.creado_en).toLocaleString()}</span>
-            `;
-            item.onclick = () => repeatDemo(demo.id);
-            demoListDiv.appendChild(item);
-        });
-    } else {
-        demoListDiv.innerHTML = `<p class="text-secondary small">No se encontraron secuencias Demo para ${DEVICE_NAME}.</p>`;
+        if (demos && Array.isArray(demos) && demos.length > 0) {
+            demoListDiv.innerHTML = ''; // Limpiar mensaje de carga
+            
+            demos.forEach(demo => {
+                const item = document.createElement('div');
+                
+                // ESTILOS: Aseguramos que parezca un botón
+                item.className = 'demo-item border-bottom border-secondary py-2';
+                item.style.cursor = 'pointer'; 
+                item.style.transition = 'background 0.2s';
+                
+                // INTERACCIÓN: Inyectamos el onclick DIRECTAMENTE en el HTML
+                // Esto hará que aparezca visible en el inspector de elementos
+                item.setAttribute('onclick', `repeatDemo(${demo.id})`);
+                
+                // EFECTO HOVER (Visual)
+                item.onmouseover = function() { this.style.backgroundColor = 'rgba(255,255,255,0.1)'; };
+                item.onmouseout = function() { this.style.backgroundColor = 'transparent'; };
+
+                item.innerHTML = `
+                    <div class="d-flex justify-content-between align-items-center">
+                        <div>
+                            <span class="fw-bold text-info">ID: ${demo.id}</span> 
+                            <span class="text-light">| Pasos: ${demo.n_pasos}</span>
+                        </div>
+                        <i class="bi bi-play-circle text-success fs-5"></i>
+                    </div>
+                    <div class="text-secondary small">
+                        ${new Date(demo.creado_en).toLocaleString()}
+                    </div>
+                `;
+                
+                demoListDiv.appendChild(item);
+            });
+        } else {
+            demoListDiv.innerHTML = `<p class="text-secondary small">No se encontraron secuencias Demo para ${DEVICE_NAME}.</p>`;
+        }
+    } catch (error) {
+        console.error('Error cargando demos:', error);
+        demoListDiv.innerHTML = `<p class="text-danger small">Error al cargar historial.</p>`;
     }
 }
 
@@ -1495,35 +1521,43 @@ function debugWebSocketData(eventData, type) {
 function actualizarUIEjecucionSecuencia() {
     const estadoSecuencia = document.getElementById('estadoSecuencia');
     const infoPasoActual = document.getElementById('infoPasoActual');
+    
+    // Obtenemos los botones
     const btnReanudar = document.getElementById('btnReanudarSecuencia');
     const btnPausar = document.getElementById('btnPausarSecuencia');
     const btnDetener = document.getElementById('btnDetenerSecuencia');
 
     if (ejecucionSecuencia.activa) {
-        estadoSecuencia.style.display = 'block';
+        if (estadoSecuencia) estadoSecuencia.style.display = 'block';
         
         if (ejecucionSecuencia.pausada) {
-            estadoSecuencia.style.backgroundColor = 'rgba(255, 193, 7, 0.2)';
-            btnReanudar.disabled = false;
-            btnPausar.disabled = true;
-            btnDetener.disabled = false;
+            if (estadoSecuencia) estadoSecuencia.style.backgroundColor = 'rgba(255, 193, 7, 0.2)';
+            
+            // VERIFICAMOS SI EXISTEN ANTES DE MODIFICARLOS
+            if(btnReanudar) btnReanudar.disabled = false;
+            if(btnPausar) btnPausar.disabled = true;
+            if(btnDetener) btnDetener.disabled = false;
         } else {
-            estadoSecuencia.style.backgroundColor = 'rgba(13, 110, 253, 0.2)';
-            btnReanudar.disabled = true;
-            btnPausar.disabled = false;
-            btnDetener.disabled = false;
+            if (estadoSecuencia) estadoSecuencia.style.backgroundColor = 'rgba(13, 110, 253, 0.2)';
+            
+            if(btnReanudar) btnReanudar.disabled = true;
+            if(btnPausar) btnPausar.disabled = false;
+            if(btnDetener) btnDetener.disabled = false;
         }
         
         if (ejecucionSecuencia.pasoActual > 0 && ejecucionSecuencia.pasoActual <= ejecucionSecuencia.totalPasos) {
-            infoPasoActual.classList.remove('hidden');
+            if (infoPasoActual) infoPasoActual.classList.remove('hidden');
         }
     } else {
-        estadoSecuencia.style.display = 'block';
-        estadoSecuencia.style.backgroundColor = 'var(--bs-secondary)';
-        infoPasoActual.classList.add('hidden');
-        btnReanudar.disabled = true;
-        btnPausar.disabled = true;
-        btnDetener.disabled = true;
+        if (estadoSecuencia) {
+            estadoSecuencia.style.display = 'block';
+            estadoSecuencia.style.backgroundColor = 'var(--bs-secondary)';
+        }
+        if (infoPasoActual) infoPasoActual.classList.add('hidden');
+        
+        if(btnReanudar) btnReanudar.disabled = true;
+        if(btnPausar) btnPausar.disabled = true;
+        if(btnDetener) btnDetener.disabled = true;
     }
 }
 

@@ -4,7 +4,7 @@
     --card-bg: #151725;         /* Fondo de tarjetas */
     --panel-border: #2d3045;    /* Bordes sutiles */
     --text-main: #e1e1e6;
-    --text-muted: #a0a0b0;
+    --text-muted: #f8f8fa;
     --accent-color: #00f2ff;    /* Cian neón para detalles */
     --header-height: 60px;
 }
@@ -163,3 +163,9 @@ h1 { font-size: 1.25rem; margin: 0; font-weight: 600; color: var(--primary-color
 @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } }
 .live-indicator { width: 8px; height: 8px; background: #00ff00; border-radius: 50%; display: inline-block; margin-right: 5px; animation: pulse 2s infinite; }
 .disconnected { background: #ff0000; animation: none; }
+
+/* Agrega esto a tu CSS si no lo tienes */
+.demo-item:hover {
+    background-color: rgba(255, 255, 255, 0.1);
+    cursor: pointer;
+}
